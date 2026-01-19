@@ -1,6 +1,6 @@
 {
-  "overall_progress": "61%",
-  "files_converted": "29/49",
+  "overall_progress": "65%",
+  "files_converted": "31/49",
   "last_updated": "2025-01-19 Session 4",
   "source": "C:\\Users\\timw\\Desktop\\SESSION01\\GServer-v2",
   "target": "C:\\Users\\timw\\Desktop\\SESSION01\\gserver-go",
@@ -26,13 +26,14 @@
     "LevelItem.cpp": {"status": "complete", "percent": 100, "notes": "Item type definitions, item list, item pickup effects"},
     "LevelLink.cpp": {"status": "complete", "percent": 100, "notes": "LevelLink with all getters/setters, GetLinkStr, ParseLinkStr"},
     "LevelSign.cpp": {"status": "complete", "percent": 100, "notes": "Sign encoding/decoding with custom character tables, symbol codes"},
-    "LevelBaddy.cpp": {"status": "not_started", "percent": 0, "notes": "Baddy management"},
+    "LevelBaddy.cpp": {"status": "complete", "percent": 100, "notes": "10 baddy types, modes (walk/hunt/hurt/die/etc), item dropping, props, verses"},
     "LevelBoardChange.cpp": {"status": "complete", "percent": 100, "notes": "Board changes with newTiles/oldTiles, GetBoardStr, SwapTiles, timeout support"},
     "Map.cpp": {"status": "complete", "percent": 100, "notes": "BIGMAP and GMAP loading, level positioning, guntokenize helper"}
   },
   "utility_files": {
     "FilePermissions.cpp": {"status": "complete", "percent": 100, "notes": "Permission system with read/write flags, regex wildcard matching"},
-    "StringUtils.cpp": {"status": "complete", "percent": 100, "notes": "Array retokenization (splitInput in Go)"}
+    "StringUtils.cpp": {"status": "complete", "percent": 100, "notes": "Array retokenization (splitInput in Go)"},
+    "WordFilter.cpp": {"status": "complete", "percent": 100, "notes": "Chat filtering with pattern matching, precision (abs/%), word position (full/start/part), actions: log, tellrc, replace, warn, jail, ban"}
   },
   "protocol_implementation": {
     "nc_packets": {
@@ -129,11 +130,11 @@
   },
   "statistics": {
     "total_cpp_files": 49,
-    "converted": 29,
+    "converted": 31,
     "partially_converted": 11,
-    "not_started": 9,
+    "not_started": 7,
     "estimated_cpp_lines": 15000,
-    "estimated_go_lines": 5800,
+    "estimated_go_lines": 6100,
     "target_go_lines": "12000-15000"
   }
 }

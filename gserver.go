@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ type Server struct {
 	last1mTimer    time.Time
 	last5mTimer    time.Time
 	shutdown       chan struct{}
+	wordFilter     *WordFilter
 }
 
 func NewServer(name string) *Server {
@@ -63,6 +65,7 @@ func NewServer(name string) *Server {
 	s.serverList = NewServerList(s)
 	s.triggerCommands = make(map[string]func(*Player, []string) bool)
 	s.initTriggerCommands()
+	s.wordFilter = &WordFilter{server: s}
 	return s
 }
 
@@ -217,7 +220,9 @@ func (s *Server) loadClasses(print bool){}
 func (s *Server) loadMaps(print bool){}
 func (s *Server) loadNpcs(print bool){}
 func (s *Server) loadTranslations(){}
-func (s *Server) loadWordFilter(){}
+func (s *Server) loadWordFilter(){
+	s.wordFilter.load("config/wordfilter.txt")
+}
 func (s *Server) loadConfigFiles() error {
 	s.log(":: Loading server configuration...\n")
 	s.log("     Loading settings...\n")
@@ -4346,11 +4351,223 @@ type LevelTiles struct {
 }
 type LevelItemType int
 
-type LevelBaddy struct {
-	id        uint8
-	x, y      float32
-	baddyType byte
+const (
+	BDPROP_ID         = 0
+	BDPROP_X          = 1
+	BDPROP_Y          = 2
+	BDPROP_TYPE       = 3
+	BDPROP_POWERIMAGE = 4
+	BDPROP_MODE       = 5
+	BDPROP_ANI        = 6
+	BDPROP_DIR        = 7
+	BDPROP_VERSESIGHT = 8
+	BDPROP_VERSEHURT  = 9
+	BDPROP_VERSEATTACK = 10
+	BDPROP_COUNT      = 11
+)
+
+const (
+	BDMODE_WALK      = 0
+	BDMODE_LOOK      = 1
+	BDMODE_HUNT      = 2
+	BDMODE_HURT      = 3
+	BDMODE_BUMPED    = 4
+	BDMODE_DIE       = 5
+	BDMODE_SWAMPSHOT = 6
+	BDMODE_HAREJUMP  = 7
+	BDMODE_OCTOSHOT  = 8
+	BDMODE_DEAD      = 9
+	BDMODE_COUNT     = 10
+)
+
+const baddyTypes = 10
+
+var baddyImages = []string{
+	"baddygray.png", "baddyblue.png", "baddyred.png", "baddyblue.png", "baddygray.png",
+	"baddyhare.png", "baddyoctopus.png", "baddygold.png", "baddylizardon.png", "baddydragon.png",
 }
+
+var baddyStartMode = []byte{
+	BDMODE_WALK, BDMODE_WALK, BDMODE_WALK, BDMODE_WALK, BDMODE_SWAMPSHOT,
+	BDMODE_HAREJUMP, BDMODE_WALK, BDMODE_WALK, BDMODE_WALK, BDMODE_WALK,
+}
+
+var baddyPower = []int{
+	2, 3, 4, 3, 2,
+	1, 1, 6, 12, 8,
+}
+
+type LevelBaddy struct {
+	server           *Server
+	level            *Level
+	mu               sync.RWMutex
+	baddyType        byte
+	id               byte
+	power, mode, ani, dir byte
+	x, y, startX, startY float32
+	image            string
+	verses           [3]string
+	canRespawn       bool
+	hasCustomImage   bool
+	timeout          time.Time
+}
+
+func NewLevelBaddy(x float32, y float32, baddyType byte, level *Level, server *Server) *LevelBaddy {
+	if baddyType >= baddyTypes { baddyType = 0 }
+	return &LevelBaddy{server: server, level: level, baddyType: baddyType, x: x, y: y, startX: x, startY: y, canRespawn: true}
+}
+
+func (lb *LevelBaddy) reset() {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	lb.mode = baddyStartMode[lb.baddyType]
+	lb.x = lb.startX
+	lb.y = lb.startY
+	lb.power = byte(baddyPower[lb.baddyType])
+	lb.image = baddyImages[lb.baddyType]
+	lb.dir = (2 << 2) | 2
+	lb.ani = 0
+	lb.hasCustomImage = false
+}
+
+func (lb *LevelBaddy) dropItem() {
+	itemId := rand.Intn(12)
+	var itemType LevelItemType
+	switch itemId {
+	case 0, 1, 2, 3, 4, 5:
+		itemType = getItemId(strconv.Itoa(itemId))
+	default:
+		if itemId > 5 && itemId < 10 { itemType = ItemGreenRupee }
+	}
+	if itemType != LevelItemType(-1) {
+		if lb.level != nil {
+			lb.level.mu.Lock()
+			lb.level.items = append(lb.level.items, LevelItem{x: lb.x, y: lb.y, itemType: itemType})
+			lb.level.mu.Unlock()
+			buf := NewBuffer()
+			buf.WriteByte(PLO_ITEMADD)
+			buf.WriteByte(byte(lb.x * 2))
+			buf.WriteByte(byte(lb.y * 2))
+			buf.WriteByte(byte(itemType))
+			for _, pid := range lb.level.players {
+				if pl, ok := lb.server.players[pid]; ok { pl.SendPacket(buf.Bytes()) }
+			}
+		}
+	}
+}
+
+func (lb *LevelBaddy) getProp(propId int, clientVersion int) []byte {
+	lb.mu.RLock()
+	defer lb.mu.RUnlock()
+	buf := NewBuffer()
+	switch propId {
+	case BDPROP_ID:
+		buf.WriteByte(lb.id)
+	case BDPROP_X:
+		buf.WriteByte(byte(lb.x * 2))
+	case BDPROP_Y:
+		buf.WriteByte(byte(lb.y * 2))
+	case BDPROP_TYPE:
+		buf.WriteByte(lb.baddyType)
+	case BDPROP_POWERIMAGE:
+		buf.WriteByte(lb.power)
+		image := lb.image
+		if clientVersion < 201 && lb.image == baddyImages[lb.baddyType] {
+			image = strings.ReplaceAll(lb.image, ".png", ".gif")
+		}
+		buf.WriteString(image)
+	case BDPROP_MODE:
+		buf.WriteByte(lb.mode)
+	case BDPROP_ANI:
+		buf.WriteByte(lb.ani)
+	case BDPROP_DIR:
+		buf.WriteByte(lb.dir)
+	case BDPROP_VERSESIGHT, BDPROP_VERSEHURT, BDPROP_VERSEATTACK:
+		verseId := int(propId - BDPROP_VERSESIGHT)
+		if verseId < len(lb.verses) {
+			buf.WriteString(lb.verses[verseId])
+		} else {
+			buf.WriteByte(0)
+		}
+	}
+	return buf.Bytes()
+}
+
+func (lb *LevelBaddy) getProps(clientVersion int) []byte {
+	buf := NewBuffer()
+	for i := 1; i < BDPROP_COUNT; i++ {
+		buf.WriteByte(byte(i))
+		buf.Write(lb.getProp(i, clientVersion))
+	}
+	return buf.Bytes()
+}
+
+func (lb *LevelBaddy) setProps(data []byte) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	buf := NewBufferFromBytes(data)
+	for buf.Remaining() > 0 {
+		propId := buf.ReadGChar()
+		switch propId {
+		case BDPROP_ID:
+			lb.id = buf.ReadGChar()
+		case BDPROP_X:
+			val := float32(buf.ReadGChar()) / 2.0
+			if val < 0 { val = 0 } else if val > 63.5 { val = 63.5 }
+			lb.x = val
+		case BDPROP_Y:
+			val := float32(buf.ReadGChar()) / 2.0
+			if val < 0 { val = 0 } else if val > 63.5 { val = 63.5 }
+			lb.y = val
+		case BDPROP_TYPE:
+			lb.baddyType = byte(buf.ReadGChar())
+		case BDPROP_POWERIMAGE:
+			lb.power = byte(buf.ReadGChar())
+			if buf.Remaining() > 0 {
+				strLen := buf.ReadGChar()
+				if strLen > 0 && buf.Remaining() >= int(strLen) {
+					newImage := string(buf.ReadBytes(int(strLen)))
+					if newImage == "" {
+						lb.image = baddyImages[lb.baddyType]
+					} else if !lb.hasCustomImage {
+						lb.hasCustomImage = true
+						lb.image = newImage
+					}
+				}
+			}
+		case BDPROP_MODE:
+			lb.mode = byte(buf.ReadGChar())
+			if lb.baddyType == 4 && lb.mode == BDMODE_HURT {
+				lb.timeout = time.Now().Add(2 * time.Second)
+			} else if lb.mode == BDMODE_DIE {
+				lb.timeout = time.Now().Add(2 * time.Second)
+				if lb.server.settings.GetBool("baddyitems", false) { go lb.dropItem() }
+			} else if lb.mode == BDMODE_DEAD {
+				if lb.canRespawn {
+					respawnTime := lb.server.settings.GetInt("baddyrespawntime", 60)
+					lb.timeout = time.Now().Add(time.Duration(respawnTime) * time.Second)
+				} else if lb.level != nil {
+					lb.level.removeBaddy(lb.id)
+				}
+			}
+		case BDPROP_ANI:
+			lb.ani = byte(buf.ReadGChar())
+		case BDPROP_DIR:
+			lb.dir = byte(buf.ReadGChar())
+		case BDPROP_VERSESIGHT, BDPROP_VERSEHURT, BDPROP_VERSEATTACK:
+			verseId := int(propId - BDPROP_VERSESIGHT)
+			if verseId < len(lb.verses) {
+				strLen := buf.ReadGChar()
+				if strLen > 0 && buf.Remaining() >= int(strLen) {
+					lb.verses[verseId] = string(buf.ReadBytes(int(strLen)))
+				}
+			}
+		}
+	}
+}
+
+func (lb *LevelBaddy) setRespawn(respawn bool) { lb.mu.Lock(); defer lb.mu.Unlock(); lb.canRespawn = respawn }
+func (lb *LevelBaddy) setId(id byte) { lb.mu.Lock(); defer lb.mu.Unlock(); lb.id = id }
 type LevelBoardChange struct {
 	x, y, width, height int
 	newTiles, oldTiles  []byte
@@ -4831,6 +5048,12 @@ func (l *Level) setTileAt(x, y int, tile int16) {
 	if x < 0 || x >= 64 || y < 0 || y >= 64 { return }
 	if l.tiles[0] == nil { l.tiles[0] = &LevelTiles{tiles: make([]int16, 4096)} }
 	if len(l.tiles[0].tiles) == 4096 { l.tiles[0].tiles[x+y*64] = tile }
+}
+
+func (l *Level) removeBaddy(id uint8) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.baddies, id)
 }
 
 // ============ NPC ============
@@ -5809,4 +6032,258 @@ func (p *Player) getExternalPlayerByAccount(accountName string) *Player {
 		}
 	}
 	return nil
+}
+
+const (
+	FILTER_CHECK_CHAT  = 0x1
+	FILTER_CHECK_PM    = 0x2
+	FILTER_CHECK_NICK  = 0x4
+	FILTER_CHECK_TOALL = 0x8
+)
+
+const (
+	FILTER_POSITION_FULL  = 1
+	FILTER_POSITION_START = 2
+	FILTER_POSITION_PART  = 3
+)
+
+const (
+	FILTER_ACTION_LOG     = 0x1
+	FILTER_ACTION_TELLRC  = 0x2
+	FILTER_ACTION_REPLACE = 0x4
+	FILTER_ACTION_WARN    = 0x8
+	FILTER_ACTION_JAIL    = 0x10
+	FILTER_ACTION_BAN     = 0x20
+)
+
+type WordFilterRule struct {
+	check                 int
+	wordPosition          int
+	action                int
+	precision             int
+	precisionPercentage   bool
+	match                 string
+	warnMessage           string
+}
+
+type WordFilter struct {
+	server               *Server
+	mu                   sync.RWMutex
+	showWordsToRC        bool
+	defaultWarnMessage   string
+	rules                []WordFilterRule
+}
+
+func wfIsUpper(c byte) bool { return c >= 65 && c <= 90 }
+
+func wfIsLower(c byte) bool { return c >= 97 && c <= 122 }
+
+func wfToLower(c byte) byte {
+	if c >= 65 && c <= 90 { return c + 32 }
+	return c
+}
+
+func (wf *WordFilter) load(fileName string) {
+	wf.mu.Lock()
+	defer wf.mu.Unlock()
+	wf.rules = nil
+	lines, err := wf.server.config.LoadFileAsLines(fileName)
+	if err != nil { return }
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" { continue }
+		parts := strings.Fields(line)
+		if len(parts) == 0 { continue }
+
+		if parts[0] == "RULE" {
+			rule := WordFilterRule{precision: 100, precisionPercentage: true}
+			i++
+			for i < len(lines) && strings.TrimSpace(lines[i]) != "RULEEND" {
+				line2 := strings.TrimSpace(lines[i])
+				parts2 := strings.Fields(line2)
+				if len(parts2) == 0 { i++; continue }
+
+				switch parts2[0] {
+				case "CHECK":
+					for j := 1; j < len(parts2); j++ {
+						switch parts2[j] {
+						case "chat": rule.check |= FILTER_CHECK_CHAT
+						case "pm": rule.check |= FILTER_CHECK_PM
+						case "nick": rule.check |= FILTER_CHECK_NICK
+						case "toall": rule.check |= FILTER_CHECK_TOALL
+						}
+					}
+				case "MATCH":
+					if len(parts2) == 2 { rule.match = parts2[1] }
+				case "PRECISION":
+					if len(parts2) == 2 {
+						if strings.Contains(parts2[1], "%") {
+							rule.precisionPercentage = true
+							parts2[1] = strings.TrimSuffix(parts2[1], "%")
+						} else { rule.precisionPercentage = false }
+						if val, err := strconv.Atoi(parts2[1]); err == nil { rule.precision = val }
+					}
+				case "WORDPOSITION":
+					for j := 1; j < len(parts2); j++ {
+						switch parts2[j] {
+						case "full": rule.wordPosition |= FILTER_POSITION_FULL
+						case "start": rule.wordPosition |= FILTER_POSITION_START
+						case "part": rule.wordPosition |= FILTER_POSITION_PART
+						}
+					}
+				case "ACTION":
+					for j := 1; j < len(parts2); j++ {
+						switch parts2[j] {
+						case "log": rule.action |= FILTER_ACTION_LOG
+						case "tellrc": rule.action |= FILTER_ACTION_TELLRC
+						case "replace": rule.action |= FILTER_ACTION_REPLACE
+						case "warn": rule.action |= FILTER_ACTION_WARN
+						case "jail": rule.action |= FILTER_ACTION_JAIL
+						case "ban": rule.action |= FILTER_ACTION_BAN
+						}
+					}
+				case "WARNMESSAGE":
+					if len(line2) > 12 { rule.warnMessage = strings.TrimSpace(line2[12:]) }
+				}
+				i++
+			}
+			if rule.check != 0 && rule.action != 0 && rule.wordPosition != 0 { wf.rules = append(wf.rules, rule) }
+		} else if parts[0] == "WARNMESSAGE" {
+			if len(line) > 12 { wf.defaultWarnMessage = strings.TrimSpace(line[12:]) }
+		} else if parts[0] == "SHOWWORDSTORC" {
+			if len(parts) == 2 && parts[1] == "true" { wf.showWordsToRC = true }
+		}
+	}
+}
+
+func (wf *WordFilter) apply(player *Player, chat string, check int) string {
+	wf.mu.RLock()
+	if len(chat) == 0 || len(wf.rules) == 0 || check == 0 { wf.mu.RUnlock(); return chat }
+	wf.mu.RUnlock()
+
+	out := chat
+	var warnMessage string
+	chatWords := strings.Fields(chat)
+	var wordsFound []string
+	actionsFound := 0
+
+	for _, rule := range wf.rules {
+		if check&rule.check == 0 { continue }
+
+		if rule.wordPosition != FILTER_POSITION_PART {
+			for _, word := range chatWords {
+				if rule.wordPosition == FILTER_POSITION_FULL && len(word) != len(rule.match) { continue }
+
+				wordsMatched := 0
+				failed := false
+				for chatpos := 0; chatpos < len(rule.match) && chatpos < len(word); chatpos++ {
+					letter := rule.match[chatpos]
+					wordLetter := word[chatpos]
+					if letter == '?' {
+						wordsMatched++
+						continue
+					}
+					if wfIsLower(byte(letter)) && byte(letter) == wfToLower(wordLetter) {
+						wordsMatched++
+					} else if wfIsUpper(byte(letter)) {
+						if wfToLower(byte(letter)) == wfToLower(wordLetter) { wordsMatched++ } else { failed = true; break }
+					}
+				}
+				if failed { continue }
+
+				if !rule.precisionPercentage && wordsMatched < rule.precision { continue }
+				if rule.precisionPercentage && rule.precision > int((float64(wordsMatched)/float64(len(rule.match)))*100) { continue }
+
+				wordsFound = append(wordsFound, word)
+				actionsFound |= rule.action
+
+				if rule.action&FILTER_ACTION_WARN != 0 {
+					warnMessage = rule.warnMessage
+					goto WordFilterActions
+				}
+
+				if rule.action&FILTER_ACTION_REPLACE != 0 {
+					censor := strings.Repeat("*", len(word))
+					out = strings.ReplaceAll(out, word, censor)
+				}
+			}
+		} else if rule.wordPosition == FILTER_POSITION_PART {
+			bypass := []byte{' ', '\r', '\n'}
+			for wordpos := 0; wordpos < len(chat); wordpos++ {
+				wordStart := wordpos
+				wordsMatched := 0
+				failed := false
+				var word strings.Builder
+				for chatpos := 0; chatpos < len(rule.match) && wordpos+chatpos < len(chat); chatpos++ {
+					if wordpos+chatpos == wordStart {
+						for _, b := range bypass {
+							if chat[wordpos+chatpos] == b { failed = true; break }
+						}
+						if failed { break }
+					}
+
+					for _, b := range bypass {
+						if chat[wordpos+chatpos] == b { word.WriteByte(b); wordpos++ }
+					}
+
+					letter := rule.match[chatpos]
+					wordLetter := chat[wordpos+chatpos]
+					if letter == '?' {
+						word.WriteByte(wordLetter)
+						wordsMatched++
+						continue
+					}
+					if wfIsLower(byte(letter)) && byte(letter) == wfToLower(wordLetter) {
+						wordsMatched++
+					} else if wfIsUpper(byte(letter)) {
+						if wfToLower(byte(letter)) == wfToLower(wordLetter) { wordsMatched++ } else { failed = true; break }
+					}
+					word.WriteByte(wordLetter)
+				}
+				wordpos = wordStart
+				if failed { continue }
+
+				if !rule.precisionPercentage && wordsMatched < rule.precision { continue }
+				if rule.precisionPercentage && rule.precision > int((float64(wordsMatched)/float64(len(rule.match)))*100) { continue }
+
+				trimmedWord := strings.TrimSpace(word.String())
+				wordsFound = append(wordsFound, trimmedWord)
+				actionsFound |= rule.action
+
+				if rule.action&FILTER_ACTION_WARN != 0 {
+					warnMessage = rule.warnMessage
+					goto WordFilterActions
+				}
+
+				if rule.action&FILTER_ACTION_REPLACE != 0 {
+					censor := strings.Repeat("*", len(trimmedWord))
+					out = strings.ReplaceAll(out, trimmedWord, censor)
+				}
+			}
+		}
+	}
+
+WordFilterActions:
+	if len(wordsFound) == 0 { return chat }
+
+	badwords := strings.Join(wordsFound, ", ")
+
+	if actionsFound&FILTER_ACTION_LOG != 0 {
+		wf.server.logger.Info("[Word Filter] Player %s was caught using these words: %s", player.accountName, badwords)
+	}
+
+	if wf.showWordsToRC || actionsFound&FILTER_ACTION_TELLRC != 0 {
+		buf := NewBuffer()
+		buf.WriteByte(PLO_RC_CHAT)
+		buf.WriteString8(fmt.Sprintf("Word Filter: Player %s was caught using these words: %s", player.accountName, badwords))
+		wf.server.sendPacketToType(PLTYPE_RC, buf.Bytes())
+	}
+
+	if actionsFound&FILTER_ACTION_WARN != 0 {
+		if warnMessage == "" { return wf.defaultWarnMessage }
+		return warnMessage
+	}
+
+	return out
 }
