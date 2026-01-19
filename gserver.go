@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var DEBUG_MODE bool = false
+
 // ============ SERVER ============
 type Server struct {
 	name           string
@@ -184,6 +186,7 @@ func (s *Server) loadSettings(){
 	if err := s.settings.Load(s.config.ResolvePath("config/serveroptions.txt")); err != nil {
 		s.logger.Error("Could not open config/serveroptions.txt. Will use default config.")
 	}
+	DEBUG_MODE = s.settings.GetBool("debugmode", false)
 }
 func (s *Server) loadAdminSettings(){
 	if err := s.adminSettings.Load(s.config.ResolvePath("config/adminconfig.txt")); err != nil {

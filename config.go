@@ -108,7 +108,10 @@ func (l *Logger) Write(format string, args ...interface{}) {
 func (l *Logger) Error(format string, args ...interface{}) { l.Write("[ERROR] "+format, args...) }
 func (l *Logger) Warning(format string, args ...interface{}) { l.Write("[WARNING] "+format, args...) }
 func (l *Logger) Info(format string, args ...interface{}) { l.Write("[INFO] "+format, args...) }
-func (l *Logger) Debug(format string, args ...interface{}) { l.Write("[DEBUG] "+format, args...) }
+func (l *Logger) Debug(format string, args ...interface{}) {
+	if !DEBUG_MODE { return }
+	l.Write("[DEBUG] "+format, args...)
+}
 
 // FileSystem handles file operations
 type FileSystem struct { basePath string; mu sync.RWMutex; cache map[string][]byte }
