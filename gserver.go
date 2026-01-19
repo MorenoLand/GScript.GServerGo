@@ -2399,7 +2399,30 @@ func (p *Player) msgPLI_VERIFYWANTSEND(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_UPDATECLASS(packet []byte) bool {
-	p.server.logger.Debug("UPDATECLASS packet")
+	buf := NewBufferFromBytes(packet[1:])
+	_ = buf.ReadInt()
+	className := buf.ReadString()
+	p.server.logger.Debug("UPDATECLASS: %s", className)
+	p.server.weaponMu.RLock()
+	classObj, exists := p.server.classes[className]
+	p.server.weaponMu.RUnlock()
+	if exists {
+		classCode := classObj.script
+		outBuf := NewBuffer()
+		outBuf.WriteByte(PLO_RAWDATA)
+		outBuf.WriteInt(int32(len(classCode)) + 1)
+		outBuf.WriteByte('\n')
+		outBuf.WriteByte(PLO_NPCWEAPONSCRIPT)
+		outBuf.WriteString8(classCode)
+		p.send(outBuf)
+	} else {
+		headerData := []string{"class", className, "1", "0", "0", "0"}
+		classCode := strings.Join(headerData, " ")
+		buf2 := NewBuffer()
+		buf2.WriteByte(PLO_NPCWEAPONSCRIPT)
+		buf2.WriteString8(classCode)
+		p.send(buf2)
+	}
 	return true
 }
 func (p *Player) msgPLI_RAWDATA(packet []byte) bool {
