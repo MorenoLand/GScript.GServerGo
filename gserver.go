@@ -1554,9 +1554,12 @@ func (p *Player) sendPLO_LEVELLINK_FULL(link *LevelLink) bool {
 	p.send(buf)
 	return true
 }
-func (p *Player) sendPLO_SIGN(x, y int16, text string) bool {
+func (p *Player) sendPLO_SIGN(sign *LevelSign) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_LEVELSIGN).WriteShort(x).WriteShort(y).WriteGString(text)
+	buf.WriteByte(PLO_LEVELSIGN)
+	buf.WriteGChar(byte(sign.x))
+	buf.WriteGChar(byte(sign.y))
+	buf.Write([]byte(sign.text))
 	p.send(buf)
 	return true
 }
@@ -1973,7 +1976,7 @@ func (p *Player) warp(levelName string, x float64, y float64) {
 		p.sendPLO_LEVELLINK_FULL(link)
 	}
 	for _, sign := range level.signs {
-		p.sendPLO_SIGN(int16(sign.x), int16(sign.y), sign.text)
+		p.sendPLO_SIGN(sign)
 	}
 	p.loaded = true
 	p.server.logger.Debug("warp: Player %s warped to %s at (%.0f, %.0f)", p.accountName, levelName, x, y)
@@ -4973,7 +4976,7 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 				text.WriteString(lines[i] + "\n")
 				i++
 			}
-			l.signs = append(l.signs, &LevelSign{x: signx, y: signy, text: text.String()})
+			l.signs = append(l.signs, NewLevelSign(signx, signy, text.String(), false))
 		case "LINK":
 			if len(parts) < 8 { continue }
 			linkx, _ := strconv.ParseFloat(parts[1], 32)
@@ -5155,7 +5158,7 @@ func (l *Level) loadZelda(server *Server, levelName string) bool {
 		sx := int8(lineBuf.ReadByte())
 		sy := int8(lineBuf.ReadByte())
 		text := string(lineBuf.data[lineBuf.read:])
-		l.signs = append(l.signs, &LevelSign{x: int(sx), y: int(sy), text: text})
+		l.signs = append(l.signs, NewLevelSign(int(sx), int(sy), text, true))
 	}
 	return true
 }
