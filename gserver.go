@@ -645,7 +645,7 @@ type Account struct {
 	accountName, communityName, email, adminIp, banReason, banLength, accountComments, levelName string
 	accountIpStr                                                                                 string
 	accountIp                                                                                    uint
-	isBanned, isGuest, isExternal, isLoadOnly, isStaff                                            bool
+	isBanned, isGuest, isExternal, isLoadOnly, isStaff, loadedFromDefault                       bool
 	adminRights                                                                                  int
 	deviceId                                                                                     int64
 	character                                                                                    Character
@@ -701,15 +701,18 @@ func (a *Account) LoadAccount(accountName string, ignoreNick bool) bool {
 	defer a.mu.Unlock()
 	a.accountName = accountName
 	var filePath string
+	loadedFromDefault := false
 	if data, err := a.server.config.LoadFile("accounts/" + accountName + ".txt"); err == nil && len(data) > 0 {
 		filePath = "accounts/" + accountName + ".txt"
 	} else {
 		filePath = "accounts/defaultaccount.txt"
+		loadedFromDefault = true
 	}
 	lines, _ := a.server.config.LoadFileAsLines(filePath)
 	if len(lines) == 0 || lines[0] != "GRACC001" {
 		return false
 	}
+	a.loadedFromDefault = loadedFromDefault
 	a.flagList = make(map[string]string)
 	a.weaponList = []string{}
 	a.chestList = []string{}
@@ -1396,7 +1399,11 @@ func (p *Player) handleLogin(packet []byte) bool {
 	}
 	p.server.logger.Info("Setting encryption gen to %d (ENCRYPT_GEN_3=%d) for client type %d", p.encryption.gen, ENCRYPT_GEN_3, clientType)
 	if !p.LoadAccount(account, false) {
-		p.server.logger.Info("Creating new account: %s", account)
+		p.server.logger.Error("Failed to load account for: %s", account)
+		return false
+	}
+	if p.loadedFromDefault && !p.isLoadOnly {
+		p.server.logger.Info("Creating new account from default: %s", account)
 		p.SaveAccount()
 	}
 	p.server.logger.Info("Sending PLO_PLAYERPROPS...")
@@ -1971,9 +1978,25 @@ func (p *Player) warp(levelName string, x float64, y float64) {
 		p.server.logger.Error("warp: Failed to load level: %s", cleanLevelName)
 		return
 	}
-	levelPath := "world/levels/" + cleanLevelName + ".nw"
-	if !level.loadLevel(p.server, levelPath) {
-		p.server.logger.Warning("warp: Could not load level file %s, using empty level", levelPath)
+	// Try multiple level paths based on folder config
+	paths := []string{
+		"world/" + cleanLevelName + ".nw",
+		"world/levels/" + cleanLevelName + ".nw",
+		"world/" + cleanLevelName + ".zelda",
+		"world/levels/" + cleanLevelName + ".zelda",
+		"world/" + cleanLevelName + ".graal",
+		"world/levels/" + cleanLevelName + ".graal",
+	}
+	levelLoaded := false
+	for _, levelPath := range paths {
+		if level.loadLevel(p.server, levelPath) {
+			levelLoaded = true
+			p.server.logger.Debug("warp: Loaded level from %s", levelPath)
+			break
+		}
+	}
+	if !levelLoaded {
+		p.server.logger.Warning("warp: Could not load level file for %s, using empty level", cleanLevelName)
 	}
 	if p.currentLevel != nil {
 		p.currentLevel.removePlayer(p)
