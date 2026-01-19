@@ -44,7 +44,7 @@ How-to setup a server:
 
 ## Implementation Status
 
-**Progress: 65% (31/49 files converted)**
+**Progress: 67% (31/49 files converted)**
 
 **Note on Completion:** The percentage above represents **files converted from C++ to Go**, not functional completion. Many systems have code converted but are not yet tested or fully functional. See "Testing Status" below for actual working features.
 
@@ -64,6 +64,8 @@ How-to setup a server:
 | Item System | ✅ Complete | 25 item types with pickup effects |
 | Sign System | ✅ Complete | Encoding/decoding with custom character tables |
 | Map Loading | ✅ Complete | BIGMAP and GMAP formats with level positioning |
+| Level Loading (.nw) | ✅ Complete | BOARD, CHEST, SIGN, LINK, BADDY, NPC tokens with base64 tile decoding |
+| Level Loading (.zelda) | ✅ Complete | RLE bitstream decoding (12/13-bit), links, baddies, signs, verses support |
 | Board Changes | ✅ Complete | Tile swap, timeout support, board packet generation |
 | Level Links | ✅ Complete | Link parsing, serialization, getters/setters |
 | File Permissions | ✅ Complete | Read/write flags, regex wildcard matching |
@@ -77,7 +79,6 @@ How-to setup a server:
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Level Loading | 🚧 Partial | Level struct exists, .nw/.zelda parsing not implemented (CRITICAL BLOCKER) |
 | NPC System | 🚧 Partial | NPC struct exists, AI and script integration pending |
 | Weapon System | 🚧 Partial | Weapon struct exists, script loading pending |
 | Player Scripts | 🚧 Partial | UPDATEGANI, UPDATESCRIPT, UPDATECLASS handlers exist |
@@ -90,8 +91,6 @@ How-to setup a server:
 | GS2 Scripting (Server-side) | ❌ Pending | V8 integration for server-side script execution |
 | GS2 Compiler (Server-side) | ❌ Pending | Server-side GS2 compiler not yet implemented |
 | GS2 Scripting (Client-side) | ✅ Supported | Client-side GS2 scripts work normally with existing GS2 compiler |
-| .zelda Level Parsing | ❌ Pending | .zelda format with RLE compression |
-| Level Board Data | ❌ Pending | .nw BOARD token parsing |
 | File Transfers | ❌ Pending | Upload/download system |
 
 **Note:** V8 is used ONLY for server-side script execution. Client-side GS2 scripts continue to work with the existing GS2 compiler - no changes to client-side script handling. A server-side GS2 compiler has not been implemented yet.
@@ -112,6 +111,7 @@ How-to setup a server:
 | Listserver Registration | ✅ Working | Server registers with listserver, sends heartbeats |
 | Config Files | ✅ Working | serveroptions.txt, adminconfig.txt, serverflags.txt load |
 | .nw Level Parsing | ✅ Implemented | BOARD, CHEST, SIGN, LINK, BADDY, NPC tokens parsed |
+| .zelda Level Parsing | ✅ Implemented | RLE bitstream decoding (12/13-bit), links, baddies, signs, verses |
 
 ### Partially Working ⚠️
 
@@ -125,19 +125,19 @@ How-to setup a server:
 
 | Feature | Status | Notes |
 |---------|--------|--------|
-| Game World Entry | ❓ Unverified | .nw parser implemented, needs testing with actual client |
-| Level Geometry | ❓ Unverified | Board data parsed from .nw files, warp() sends level data |
+| Game World Entry | ❓ Unverified | .nw and .zelda parsers implemented, needs testing with actual client |
+| Level Geometry | ❓ Unverified | Board data parsed from both formats, warp() sends level data |
 | Player Movement | ❓ Unverified | Depends on client receiving valid level data |
-| NPC Display | ❓ Unverified | NPCs loaded from .nw files, script execution pending V8 |
+| NPC Display | ❓ Unverified | NPCs loaded from level files, script execution pending V8 |
 
 ### Critical Blocker
 
-**V8 Scripting Integration** - The .nw level parser is implemented and functional, but:
+**V8 Scripting Integration** - Both .nw and .zelda level parsers are implemented and functional, but:
 1. Server-side GS2/GS5 script execution requires V8 integration
 2. NPC AI and weapon behaviors need script execution
 3. Full gameplay requires scripting system for interactivity
 
-**Estimated Functional Completion:** ~45% (networking works, login works, level parsing works, scripting blocked)
+**Estimated Functional Completion:** ~50% (networking works, login works, both level parsers work, scripting blocked)
 
 ## Architecture
 

@@ -5006,7 +5006,159 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 	}
 	return true
 }
-func (l *Level) loadZelda(server *Server, levelName string) bool { return false }
+func (l *Level) loadZelda(server *Server, levelName string) bool {
+	levelPath := "world/levels/" + levelName + ".zelda"
+	data, err := server.config.LoadFile(levelPath)
+	if err != nil { return false }
+	buf := NewBufferFromBytes(data)
+	l.levelName = levelName
+	version := string(buf.data[buf.read:buf.read+8])
+	buf.read += 8
+	var bits int
+	if version == "Z3-V1.03" {
+		bits = 12
+	} else if version == "Z3-V1.04" {
+		bits = 13
+	} else {
+		return false
+	}
+	var bitBuffer uint32
+	var bitRead int
+	var code uint16
+	tiles := [2]int16{-1, -1}
+	boardIndex := 0
+	count := 1
+	doubleMode := false
+	for boardIndex < 64*64 && buf.read < len(buf.data) {
+		for bitRead < bits {
+			bitBuffer += uint32(buf.ReadByte()) << bitRead
+			bitRead += 8
+		}
+		if bits == 12 {
+			code = uint16(bitBuffer & 0xFFF)
+		} else {
+			code = uint16(bitBuffer & 0x1FFF)
+		}
+		bitBuffer >>= uint(bits)
+		bitRead -= bits
+		controlBit := uint16(0x800)
+		if bits == 13 {
+			controlBit = 0x1000
+		}
+		if code&controlBit != 0 {
+			if code&0x100 != 0 {
+				doubleMode = true
+			}
+			count = int(code & 0xFF)
+			continue
+		}
+		if count == 1 {
+			l.tiles[0].tiles[boardIndex] = int16(code)
+			boardIndex++
+			continue
+		}
+		if doubleMode {
+			if tiles[0] == -1 {
+				tiles[0] = int16(code)
+				continue
+			}
+			tiles[1] = int16(code)
+			for i := 0; i < count && boardIndex < 64*64-1; i++ {
+				l.tiles[0].tiles[boardIndex] = tiles[0]
+				boardIndex++
+				l.tiles[0].tiles[boardIndex] = tiles[1]
+				boardIndex++
+			}
+			tiles = [2]int16{-1, -1}
+			doubleMode = false
+			count = 1
+		} else {
+			for i := 0; i < count && boardIndex < 64*64; i++ {
+				l.tiles[0].tiles[boardIndex] = int16(code)
+				boardIndex++
+			}
+			count = 1
+		}
+	}
+	for buf.read < len(buf.data) {
+		lineBytes := []byte{}
+		for buf.read < len(buf.data) && buf.data[buf.read] != '\n' {
+			lineBytes = append(lineBytes, buf.ReadByte())
+		}
+		if buf.read < len(buf.data) && buf.data[buf.read] == '\n' {
+			buf.read++
+		}
+		if len(lineBytes) == 0 {
+			break
+		}
+		line := string(lineBytes)
+		if line == "#" {
+			break
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 8 {
+			continue
+		}
+		linkx, _ := strconv.ParseFloat(parts[0], 32)
+		linky, _ := strconv.ParseFloat(parts[1], 32)
+		destX, _ := strconv.ParseFloat(parts[3], 32)
+		destY, _ := strconv.ParseFloat(parts[4], 32)
+		width, _ := strconv.ParseFloat(parts[5], 32)
+		height, _ := strconv.ParseFloat(parts[6], 32)
+		destLevel := strings.Join(parts[7:], " ")
+		l.links = append(l.links, &LevelLink{x: float32(linkx), y: float32(linky), destLevel: destLevel, destX: float32(destX), destY: float32(destY), width: float32(width), height: float32(height)})
+	}
+	for buf.read < len(buf.data) {
+		x := buf.ReadByte()
+		y := buf.ReadByte()
+		btype := buf.ReadByte()
+		if x == 0xFF && y == 0xFF && btype == 0xFF {
+			if buf.read < len(buf.data) && buf.data[buf.read] == '\n' {
+				buf.read++
+			}
+			break
+		}
+		bx := int8(x)
+		by := int8(y)
+		baddy := NewLevelBaddy(float32(bx), float32(by), btype, l, server)
+		baddy.id = uint8(len(l.baddies))
+		l.baddies[baddy.id] = baddy
+		if bits == 13 {
+			verseBytes := []byte{}
+			for buf.read < len(buf.data) && buf.data[buf.read] != '\n' {
+				verseBytes = append(verseBytes, buf.ReadByte())
+			}
+			if buf.read < len(buf.data) && buf.data[buf.read] == '\n' {
+				buf.read++
+			}
+			verses := strings.Split(string(verseBytes), "\\")
+			if len(verses) > 3 {
+				verses = verses[:3]
+			}
+			for i := 0; i < len(verses); i++ {
+				baddy.verses[i] = verses[i]
+			}
+		}
+	}
+	for buf.read < len(buf.data) {
+		lineBytes := []byte{}
+		for buf.read < len(buf.data) && buf.data[buf.read] != '\n' {
+			lineBytes = append(lineBytes, buf.ReadByte())
+		}
+		if buf.read < len(buf.data) && buf.data[buf.read] == '\n' {
+			buf.read++
+		}
+		if len(lineBytes) == 0 {
+			break
+		}
+		lineBuf := NewBufferFromBytes(lineBytes)
+		sx := int8(lineBuf.ReadByte())
+		sy := int8(lineBuf.ReadByte())
+		text := string(lineBuf.data[lineBuf.read:])
+		l.signs = append(l.signs, &LevelSign{x: int(sx), y: int(sy), text: text})
+	}
+	return true
+}
 
 func (l *Level) getName() string        { return l.levelName }
 func (l *Level) getModTime() time.Time  { return l.modTime }

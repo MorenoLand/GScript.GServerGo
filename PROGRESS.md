@@ -1,7 +1,7 @@
 {
-  "overall_progress": "65%",
+  "overall_progress": "67%",
   "files_converted": "31/49",
-  "last_updated": "2026-01-19 Session 4",
+  "last_updated": "2026-01-19 Session 5",
   "source": "C:\\Users\\timw\\Desktop\\SESSION01\\GServer-v2",
   "target": "C:\\Users\\timw\\Desktop\\SESSION01\\gserver-go",
   "core_files": {
@@ -23,6 +23,8 @@
     "PlayerScripts.cpp": {"status": "not_started", "percent": 0, "notes": "Player script execution"}
   },
   "level_files": {
+    "Level.cpp (loadNW)": {"status": "complete", "percent": 100, "notes": ".nw parser: BOARD, CHEST, SIGN, LINK, BADDY, NPC tokens with base64 tile decoding"},
+    "Level.cpp (loadZelda)": {"status": "complete", "percent": 100, "notes": ".zelda parser: RLE bitstream decoding (12/13-bit), links, baddies, signs, verses support"},
     "LevelItem.cpp": {"status": "complete", "percent": 100, "notes": "Item type definitions, item list, item pickup effects"},
     "LevelLink.cpp": {"status": "complete", "percent": 100, "notes": "LevelLink with all getters/setters, GetLinkStr, ParseLinkStr"},
     "LevelSign.cpp": {"status": "complete", "percent": 100, "notes": "Sign encoding/decoding with custom character tables, symbol codes"},
@@ -119,16 +121,15 @@
   "testing_status": {
     "last_tested": "2026-01-19",
     "networking": {"status": "working", "verified": true, "notes": "TCP connections accepted, GEN encryption working"},
-    "login_system": {"status": "partial", "verified": true, "notes": "Account loading works, pre-warp packets sent, .nw level parsing implemented, needs client testing"},
-    "gameplay": {"status": "unverified", "verified": false, "notes": ".nw parser implemented (BOARD/CHEST/SIGN/LINK/BADDY/NPC), needs testing with actual client to verify game world entry"},
+    "login_system": {"status": "partial", "verified": true, "notes": "Account loading works, pre-warp packets sent, .nw and .zelda parsing implemented, needs client testing"},
+    "gameplay": {"status": "unverified", "verified": false, "notes": ".nw and .zelda parsers implemented (BOARD/CHEST/SIGN/LINK/BADDY/NPC), needs testing with actual client to verify game world entry"},
     "rc_admin": {"status": "untested", "verified": false, "notes": "27 RC packet handlers implemented but not tested with actual RC client"},
     "listserver": {"status": "partial", "verified": true, "notes": "Registration works, heartbeat packets sent"},
-    "level_loading": {"status": "implemented", "verified": true, "notes": ".nw parser implemented with base64 tile decoding, .zelda parser not implemented"},
+    "level_loading": {"status": "implemented", "verified": true, "notes": ".nw parser with base64 tile decoding, .zelda parser with RLE bitstream (12/13-bit), both parse links, baddies, signs"},
     "critical_blocker": "V8 Scripting Integration - server-side GS2/GS5 execution needed for NPC AI, weapon behaviors, and full gameplay interactivity"
   },
   "next_priorities": [
-    "Test client connection with actual .nw level file",
-    "Implement .zelda level file parser (RLE bitstream decoding)",
+    "Test client connection with actual level files",
     "Verify warp() sends correct level board packet",
     "Add missing post-warp packets (PLO_LEVELMODTIME, PLO_LEVELLINK, PLO_SIGNS, PLO_CHESTS)",
     "V8 integration for server-side GS2/GS5 scripting",
