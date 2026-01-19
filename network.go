@@ -37,6 +37,11 @@ func (b *Buffer) WriteShort(v int16) *Buffer {
 	b.write = len(b.data)
 	return b
 }
+func (b *Buffer) WriteShortU(v uint16) *Buffer {
+	b.data = append(b.data, byte(v>>8), byte(v))
+	b.write = len(b.data)
+	return b
+}
 
 func (b *Buffer) WriteInt(v int32) *Buffer {
 	b.data = append(b.data, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
@@ -64,23 +69,29 @@ func (b *Buffer) WriteGByte(v uint8) *Buffer {
 }
 
 func (b *Buffer) WriteGShort(v uint16) *Buffer {
-	if v < 128 {
-		b.data = append(b.data, byte(v))
-	} else {
-		b.data = append(b.data, byte((v>>8)|0x80), byte(v))
-	}
+	if v > 28767 { v = 28767 }
+	val0 := v >> 7
+	if val0 > 223 { val0 = 223 }
+	val1 := v - (val0 << 7)
+	val0 += 32
+	val1 += 32
+	b.data = append(b.data, byte(val0), byte(val1))
 	b.write = len(b.data)
 	return b
 }
 
 func (b *Buffer) WriteGInt(v uint32) *Buffer {
-	if v < 0x80 {
-		b.data = append(b.data, byte(v))
-	} else if v < 0x4000 {
-		b.data = append(b.data, byte((v>>8)|0x80), byte(v&0xFF))
-	} else {
-		b.data = append(b.data, byte((v>>16)|0x80), byte((v>>8)&0xFF), byte(v&0xFF))
-	}
+	if v > 3682399 { v = 3682399 }
+	val0 := v >> 14
+	if val0 > 223 { val0 = 223 }
+	v -= val0 << 14
+	val1 := v >> 7
+	if val1 > 223 { val1 = 223 }
+	val2 := v - (val1 << 7)
+	val0 += 32
+	val1 += 32
+	val2 += 32
+	b.data = append(b.data, byte(val0), byte(val1), byte(val2))
 	b.write = len(b.data)
 	return b
 }

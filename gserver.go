@@ -1546,6 +1546,16 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.server.logger.Debug("Sending weapon: %s", name)
 		p.sendWeapon(weapon, 1000+uint32(len(name)))
 	}
+	p.server.logger.Info("Sending PLO_BIGMAP...")
+	bigmap := p.server.settings.Get("bigmap")
+	if bigmap != "" {
+		p.sendPLO_BIGMAP()
+	}
+	p.server.logger.Info("Sending PLO_MINIMAP...")
+	minimap := p.server.settings.Get("minimap")
+	if minimap != "" {
+		p.sendPLO_MINIMAP()
+	}
 	p.server.logger.Info("Sending PLO_RPGWINDOW...")
 	p.sendPLO_RPGWINDOW("Welcome to " + p.server.name)
 	p.server.logger.Info("Sending PLO_STARTMESSAGE...")
@@ -1555,6 +1565,44 @@ func (p *Player) handleLogin(packet []byte) bool {
 	buf.WriteByte(PLO_SERVERTEXT)
 	p.send(buf)
 	p.sendPLO_LISTPROCESSES()
+	p.server.logger.Info("Sending PLO_STAFFGUILDS...")
+	staffGuilds := p.server.settings.Get("staffguilds")
+	if staffGuilds != "" {
+		guilds := strings.Split(staffGuilds, ",")
+		buf := NewBuffer()
+		buf.WriteByte(PLO_STAFFGUILDS)
+		for _, guild := range guilds {
+			guild = strings.TrimSpace(guild)
+			if guild != "" {
+				buf.WriteString("\"" + guild + "\",")
+			}
+		}
+		if buf.Len() > 1 {
+			packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
+			p.sendPacket(packet.Bytes())
+		} else {
+			p.sendPacket(buf.Bytes())
+		}
+	}
+	p.server.logger.Info("Sending PLO_STATUSLIST...")
+	statusList := p.server.settings.Get("statuslist")
+	if statusList != "" {
+		statuses := strings.Split(statusList, ",")
+		buf := NewBuffer()
+		buf.WriteByte(PLO_STATUSLIST)
+		for _, status := range statuses {
+			status = strings.TrimSpace(status)
+			if status != "" {
+				buf.WriteString(status + ",")
+			}
+		}
+		if buf.Len() > 1 {
+			packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
+			p.sendPacket(packet.Bytes())
+		} else {
+			p.sendPacket(buf.Bytes())
+		}
+	}
 	p.sendCompress(true)
 	for _, pl := range p.server.players { if pl.isLoggedIn() && pl != p { p.sendPLO_ADDPLAYER(pl) } }
 	p.sendCompress(true)
