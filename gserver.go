@@ -179,15 +179,15 @@ func (s *Server) fiveMinuteEvents() {
 	s.saveData()
 }
 
-func (s *Server) log(msg string) { fmt.Print(msg) }
+func (s *Server) log(msg string) { s.logger.Write(msg) }
 func (s *Server) loadSettings(){
 	if err := s.settings.Load(s.config.ResolvePath("config/serveroptions.txt")); err != nil {
-		fmt.Printf("** [Error] Could not open config/serveroptions.txt. Will use default config.\n")
+		s.logger.Error("Could not open config/serveroptions.txt. Will use default config.")
 	}
 }
 func (s *Server) loadAdminSettings(){
 	if err := s.adminSettings.Load(s.config.ResolvePath("config/adminconfig.txt")); err != nil {
-		fmt.Printf("** [Error] Could not open config/adminconfig.txt. Will use default config.\n")
+		s.logger.Error("Could not open config/adminconfig.txt. Will use default config.\n")
 	}
 }
 func (s *Server) loadAllowedVersions(){}
@@ -5655,18 +5655,18 @@ func (sl *ServerList) connectServer() bool {
 	listip := sl.server.settings.Get("listip")
 	listport := sl.server.settings.Get("listport")
 	if listip == "" || listport == "" { return false }
-	fmt.Printf(":: Initializing listserver socket.\n")
+	sl.server.logger.Write(":: Initializing listserver socket.")
 	address := net.JoinHostPort(listip, listport)
 	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
 	if err != nil {
-		fmt.Printf(":: [Error] Could not connect listserver socket: %v\n", err)
+		sl.server.logger.Error("Could not connect listserver socket: %v", err)
 		return false
 	}
 	sl.conn = conn
 	sl.connected = true
 	go sl.sendLoop()
 	go sl.receiveLoop()
-	fmt.Printf(":: listserver - Connected.\n")
+	sl.server.logger.Write(":: listserver - Connected.")
 	// Set GEN_1 for first packet
 	sl.codec = ENCRYPT_GEN_1
 	// Packet 1: SVO_REGISTERV3 with writeGChar encoding
@@ -5701,7 +5701,7 @@ func (sl *ServerList) connectServer() bool {
 		localip = conn.LocalAddr().(*net.TCPAddr).IP.String()
 	}
 	if localip == "127.0.1.1" || localip == "127.0.0.1" {
-		fmt.Printf("** [WARNING] Socket returned %s for its local ip! Not sending local ip to serverlist.\n", localip)
+		sl.server.logger.Warning("Socket returned %s for its local ip! Not sending local ip to serverlist.", localip)
 		localip = ""
 	}
 	buf.WriteGChar(SVO_NEWSERVER)
@@ -5713,10 +5713,10 @@ func (sl *ServerList) connectServer() bool {
 	buf.WriteString8Encoded(ip)
 	buf.WriteString8Encoded(port)
 	buf.WriteString8Encoded(localip)
-	fmt.Printf("%s[LISTSERVER] NEWSERVER packet: name=%d desc=%d lang=%d ver=%d url=%d ip=%d port=%d localip=%d\n", formatTime(), len(name), len(desc), len(language), len(APP_VERSION), len(url), len(ip), len(port), len(localip))
-	fmt.Printf("%s[LISTSERVER] NEWSERVER data: ", formatTime())
-	for i := 0; i < 30 && i < buf.Len(); i++ { fmt.Printf("%02X ", buf.Bytes()[i]) }
-	fmt.Println()
+	sl.server.logger.Debug("[LISTSERVER] NEWSERVER packet: name=%d desc=%d lang=%d ver=%d url=%d ip=%d port=%d localip=%d", len(name), len(desc), len(language), len(APP_VERSION), len(url), len(ip), len(port), len(localip))
+	var hexData string
+	for i := 0; i < 30 && i < buf.Len(); i++ { hexData += fmt.Sprintf("%02X ", buf.Bytes()[i]) }
+	sl.server.logger.Debug("[LISTSERVER] NEWSERVER data: %s", hexData)
 	sl.sendPacket(buf.Bytes())
 	// Packet 4: SVO_SERVERHQLEVEL
 	buf = NewBuffer()
@@ -5765,23 +5765,23 @@ func (sl *ServerList) receiveLoop() {
 		sl.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := sl.conn.Read(buf)
 		if err != nil {
-			if err == io.EOF { fmt.Printf("%s[LISTSERVER] Connection closed by listserver\n", formatTime()) } else if netErr, ok := err.(net.Error); ok && netErr.Timeout() { fmt.Printf("%s[LISTSERVER] Read timeout\n", formatTime()); continue } else { fmt.Printf("%s[LISTSERVER] Receive error: %v\n", formatTime(), err) }
+			if err == io.EOF { sl.server.logger.Debug("[LISTSERVER] Connection closed by listserver") } else if netErr, ok := err.(net.Error); ok && netErr.Timeout() { sl.server.logger.Debug("[LISTSERVER] Read timeout"); continue } else { sl.server.logger.Error("[LISTSERVER] Receive error: %v", err) }
 			break
 		}
-		fmt.Printf("%s[LISTSERVER] Received %d raw bytes\n", formatTime(), n)
+		sl.server.logger.Debug("[LISTSERVER] Received %d raw bytes", n)
 		sl.readBuffer = append(sl.readBuffer, buf[:n]...)
 		sl.processListData()
 	}
 	sl.connected = false
-	fmt.Printf("%s[LISTSERVER] receiveLoop exiting\n", formatTime())
+	sl.server.logger.Debug("[LISTSERVER] receiveLoop exiting")
 }
 
 func (sl *ServerList) processListData() {
-	fmt.Printf("%s[LISTSERVER] processListData: %d bytes in buffer\n", formatTime(), len(sl.readBuffer))
+	sl.server.logger.Debug("[LISTSERVER] processListData: %d bytes in buffer", len(sl.readBuffer))
 	for len(sl.readBuffer) >= 2 {
 		// Read 2-byte length prefix (big-endian)
 		length := int(sl.readBuffer[0])<<8 | int(sl.readBuffer[1])
-		fmt.Printf("%s[LISTSERVER] Packet length: %d, have %d\n", formatTime(), length, len(sl.readBuffer))
+		sl.server.logger.Debug("[LISTSERVER] Packet length: %d, have %d", length, len(sl.readBuffer))
 		if len(sl.readBuffer) < length+2 {
 			break // Need more data
 		}
@@ -5789,10 +5789,10 @@ func (sl *ServerList) processListData() {
 		compressed := sl.readBuffer[2 : length+2]
 		// Decompress
 		reader, err := zlib.NewReader(bytes.NewReader(compressed))
-		if err != nil { fmt.Printf("%s[LISTSERVER] Decompress error: %v\n", formatTime(), err); break }
+		if err != nil { sl.server.logger.Error("[LISTSERVER] Decompress error: %v", err); break }
 		decompressed, _ := io.ReadAll(reader)
 		reader.Close()
-		fmt.Printf("%s[LISTSERVER] Decompressed to %d bytes\n", formatTime(), len(decompressed))
+		sl.server.logger.Debug("[LISTSERVER] Decompressed to %d bytes", len(decompressed))
 		// Process decompressed packets (line-by-line)
 		sl.processListPackets(decompressed)
 		// Remove processed data
@@ -5824,7 +5824,7 @@ func (sl *ServerList) processListPackets(data []byte) {
 }
 
 func (sl *ServerList) handleListPacket(packetId uint8, data []byte) {
-	fmt.Printf("%s[LISTSERVER] Received packet %d: %d bytes\n", formatTime(), packetId, len(data))
+	sl.server.logger.Debug("[LISTSERVER] Received packet %d: %d bytes", packetId, len(data))
 	switch packetId {
 	case SVI_VERIACC, SVI_VERIACC2:
 		sl.server.logger.Debug("List server verification response")
@@ -5882,12 +5882,12 @@ func (sl *ServerList) sendPacket(packet []byte) {
 	switch sl.codec {
 	case ENCRYPT_GEN_1:
 		// Raw packet
-		fmt.Printf("%s[LISTSERVER] GEN_1 Sending %d bytes: ", formatTime(), len(packet))
+		var hexOut string
 		for i, b := range packet {
-			if i == 0 { fmt.Printf(" [%d] ", b) } else { fmt.Printf("%02X ", b) }
-			if i > 20 { fmt.Printf("..."); break }
+			if i == 0 { hexOut += fmt.Sprintf(" [%d] ", b) } else { hexOut += fmt.Sprintf("%02X ", b) }
+			if i > 20 { hexOut += "..."; break }
 		}
-		fmt.Println()
+		sl.server.logger.Debug("[LISTSERVER] GEN_1 Sending %d bytes: %s", len(packet), hexOut)
 		sl.sendQueue <- packet
 	case ENCRYPT_GEN_2:
 		// Zlib compress + 2-byte length prefix
@@ -5900,12 +5900,12 @@ func (sl *ServerList) sendPacket(packet []byte) {
 		data.WriteShort(int16(len(compressed)))
 		data.Write(compressed)
 		finalPacket := data.Bytes()
-		fmt.Printf("%s[LISTSERVER] GEN_2 Sending %d bytes (compressed from %d): ", formatTime(), len(finalPacket), len(packet))
+		var hexOut string
 		for i, b := range finalPacket {
-			if i == 0 { fmt.Printf(" [%02X] ", b) } else { fmt.Printf("%02X ", b) }
-			if i > 20 { fmt.Printf("..."); break }
+			if i == 0 { hexOut += fmt.Sprintf(" [%02X] ", b) } else { hexOut += fmt.Sprintf("%02X ", b) }
+			if i > 20 { hexOut += "..."; break }
 		}
-		fmt.Println()
+		sl.server.logger.Debug("[LISTSERVER] GEN_2 Sending %d bytes (compressed from %d): %s", len(finalPacket), len(packet), hexOut)
 		sl.sendQueue <- finalPacket
 	default:
 		sl.sendQueue <- packet
