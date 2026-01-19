@@ -77,7 +77,16 @@
     }
   },
   "recent_changes": {
-    "date": "2025-01-19 Session 6 - Critical Fixes Completed",
+    "date": "2025-01-19 Session 6 continued - WriteGShort/WriteGInt encoding fixed",
+    "encoding_fixes": {
+      "status": "complete",
+      "fixes_applied": [
+        "Fixed WriteGShort to match C++ (cap 28767, 7-bit chunks, +32 offset to both bytes)",
+        "Fixed WriteGInt to match C++ (cap 3682399, 7-bit chunks, +32 offset to all bytes)",
+        "Added BIGMAP and MINIMAP packets after warp",
+        "Added STAFFGUILDS and STATUSLIST packets during login"
+      ]
+    },
     "critical_fixes": {
       "status": "complete",
       "fixes_applied": [
