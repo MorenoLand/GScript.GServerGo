@@ -1,7 +1,7 @@
 {
   "overall_progress": "65%",
   "files_converted": "31/49",
-  "last_updated": "2025-01-19 Session 4",
+  "last_updated": "2026-01-19 Session 4",
   "source": "C:\\Users\\timw\\Desktop\\SESSION01\\GServer-v2",
   "target": "C:\\Users\\timw\\Desktop\\SESSION01\\gserver-go",
   "core_files": {
@@ -116,12 +116,25 @@
     "File transfer system - pending",
     "GS2/GS5 scripting with V8 - pending"
   ],
+  "testing_status": {
+    "last_tested": "2026-01-19",
+    "networking": {"status": "working", "verified": true, "notes": "TCP connections accepted, GEN encryption working"},
+    "login_system": {"status": "partial", "verified": true, "notes": "Account loading works, pre-warp packets sent, .nw level parsing implemented, needs client testing"},
+    "gameplay": {"status": "unverified", "verified": false, "notes": ".nw parser implemented (BOARD/CHEST/SIGN/LINK/BADDY/NPC), needs testing with actual client to verify game world entry"},
+    "rc_admin": {"status": "untested", "verified": false, "notes": "27 RC packet handlers implemented but not tested with actual RC client"},
+    "listserver": {"status": "partial", "verified": true, "notes": "Registration works, heartbeat packets sent"},
+    "level_loading": {"status": "implemented", "verified": true, "notes": ".nw parser implemented with base64 tile decoding, .zelda parser not implemented"},
+    "critical_blocker": "V8 Scripting Integration - server-side GS2/GS5 execution needed for NPC AI, weapon behaviors, and full gameplay interactivity"
+  },
   "next_priorities": [
-    "NPC script integration",
+    "Test client connection with actual .nw level file",
+    "Implement .zelda level file parser (RLE bitstream decoding)",
+    "Verify warp() sends correct level board packet",
+    "Add missing post-warp packets (PLO_LEVELMODTIME, PLO_LEVELLINK, PLO_SIGNS, PLO_CHESTS)",
+    "V8 integration for server-side GS2/GS5 scripting",
+    "NPC AI and weapon behaviors with script execution",
     "Weapon system full implementation",
-    "File transfer system",
-    "GS2/GS5 scripting with V8",
-    "Package system (UPDATEPACKAGEREQUESTFILE)"
+    "File transfer system"
   ],
   "package_system": {
     "status": "complete",

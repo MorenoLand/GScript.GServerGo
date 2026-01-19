@@ -46,7 +46,9 @@ How-to setup a server:
 
 **Progress: 65% (31/49 files converted)**
 
-### ✅ Completed
+**Note on Completion:** The percentage above represents **files converted from C++ to Go**, not functional completion. Many systems have code converted but are not yet tested or fully functional. See "Testing Status" below for actual working features.
+
+### ✅ Completed (Code Converted)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
@@ -71,11 +73,11 @@ How-to setup a server:
 | Word Filter | ✅ Complete | Pattern matching, precision (abs/%), word position (full/start/part), actions: log/tellrc/replace/warn/jail/ban |
 | Baddy System | ✅ Complete | 10 baddy types, 10 modes (WALK/LOOK/HUNT/HURT/DIE/SWAMPSHOT/HAREJUMP/OCTOSHOT/DEAD), item dropping, props, verses, respawn |
 
-### 🚧 Partial
+### 🚧 Partial (Code Converted, Needs Testing/Completion)
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Level Loading | 🚧 Partial | Level struct exists, .nw/.zelda parsing not implemented |
+| Level Loading | 🚧 Partial | Level struct exists, .nw/.zelda parsing not implemented (CRITICAL BLOCKER) |
 | NPC System | 🚧 Partial | NPC struct exists, AI and script integration pending |
 | Weapon System | 🚧 Partial | Weapon struct exists, script loading pending |
 | Player Scripts | 🚧 Partial | UPDATEGANI, UPDATESCRIPT, UPDATECLASS handlers exist |
@@ -93,6 +95,49 @@ How-to setup a server:
 | File Transfers | ❌ Pending | Upload/download system |
 
 **Note:** V8 is used ONLY for server-side script execution. Client-side GS2 scripts continue to work with the existing GS2 compiler - no changes to client-side script handling. A server-side GS2 compiler has not been implemented yet.
+
+## Testing Status
+
+**Last Updated:** 2026-01-19
+
+### Verified Working ✅
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Server Startup | ✅ Working | Server initializes, loads config, binds to port |
+| TCP Connections | ✅ Working | Client can connect to server |
+| GEN Encryption | ✅ Working | All GEN versions (1-5) encrypt/decrypt correctly |
+| Account Loading | ✅ Working | GRACC001 format accounts load/save correctly |
+| Pre-Warp Packets | ✅ Working | PLAYERPROPS, FLAGSET, etc. sent to client |
+| Listserver Registration | ✅ Working | Server registers with listserver, sends heartbeats |
+| Config Files | ✅ Working | serveroptions.txt, adminconfig.txt, serverflags.txt load |
+| .nw Level Parsing | ✅ Implemented | BOARD, CHEST, SIGN, LINK, BADDY, NPC tokens parsed |
+
+### Partially Working ⚠️
+
+| Feature | Status | Issue |
+|---------|--------|--------|
+| Login Flow | ⚠️ Partial | Account auth works, level data loads, client connection issue needs verification |
+| RC Protocol | ⚠️ Untested | 27 packet handlers implemented but not verified with RC client |
+| NC Protocol | ⚠️ Untested | 18 packet handlers implemented but not verified |
+
+### Needs Verification ❓
+
+| Feature | Status | Notes |
+|---------|--------|--------|
+| Game World Entry | ❓ Unverified | .nw parser implemented, needs testing with actual client |
+| Level Geometry | ❓ Unverified | Board data parsed from .nw files, warp() sends level data |
+| Player Movement | ❓ Unverified | Depends on client receiving valid level data |
+| NPC Display | ❓ Unverified | NPCs loaded from .nw files, script execution pending V8 |
+
+### Critical Blocker
+
+**V8 Scripting Integration** - The .nw level parser is implemented and functional, but:
+1. Server-side GS2/GS5 script execution requires V8 integration
+2. NPC AI and weapon behaviors need script execution
+3. Full gameplay requires scripting system for interactivity
+
+**Estimated Functional Completion:** ~45% (networking works, login works, level parsing works, scripting blocked)
 
 ## Architecture
 
