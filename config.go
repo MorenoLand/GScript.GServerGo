@@ -82,7 +82,7 @@ func (l *Logger) Open(filename string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.logToFile { return nil }
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil { return err }
 	l.file = file
 	return nil

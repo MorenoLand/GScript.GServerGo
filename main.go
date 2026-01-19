@@ -39,20 +39,21 @@ func main(){
 	}
 	srv:=NewServer("GServer-Go")
 	srv.config.basePath="servers/"+server+"/"
-	logServer(fmt.Sprintf(":: Starting server: %s.", server))
+	srv.logger.Open("GServer.log")
+	srv.logger.Write(":: Starting server: %s.", server)
 	if err:=srv.Init(serverIP,*port,localIP,serverInterface);err!=nil{ fmt.Printf("** [Error] Failed to start server: %s: %v\n", server, err); os.Exit(1) }
 	srv.loadSettings()
 	if *serverName!=""{ srv.name=*serverName }
 	displayName:=srv.name
 	if srv.settings.Get("name")!=""{ displayName=srv.settings.Get("name") }
-	logServer(fmt.Sprintf(":: Started server %s (%s)", server, displayName))
-	logServer(":: Press CTRL+C to close the program.  DO NOT CLICK THE X, you will LOSE data!")
+	srv.logger.Write(":: Started server %s (%s)", server, displayName)
+	srv.logger.Write(":: Press CTRL+C to close the program.  DO NOT CLICK THE X, you will LOSE data!")
 	sigChan:=make(chan os.Signal,1)
 	signal.Notify(sigChan,syscall.SIGINT,syscall.SIGTERM)
 	errChan:=make(chan error,1)
 	go func(){ errChan<-srv.Run() }()
 	select{
-	case<-sigChan: logServer(":: The server is now shutting down...\n-------------------------------------\n"); srv.Stop()
+	case<-sigChan: srv.logger.Write(":: The server is now shutting down...\n-------------------------------------\n"); srv.Stop()
 	case err:=<-errChan: if err!=nil{ fmt.Printf("Server error: %v\n", err) }
 	}
 }
