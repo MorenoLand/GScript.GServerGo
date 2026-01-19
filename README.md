@@ -44,7 +44,7 @@ How-to setup a server:
 
 ## Implementation Status
 
-**Progress: 61% (29/49 files converted)**
+**Progress: 65% (31/49 files converted)**
 
 ### ✅ Completed
 
@@ -68,6 +68,8 @@ How-to setup a server:
 | Package System | ✅ Complete | CRC32 checksums, file list, reload support |
 | Trigger Commands | ✅ Complete | 13 commands: weapons, groups, guilds, RC chat |
 | Guild System | ✅ Complete | Add/remove members, set/remove guilds, nickname updates |
+| Word Filter | ✅ Complete | Pattern matching, precision (abs/%), word position (full/start/part), actions: log/tellrc/replace/warn/jail/ban |
+| Baddy System | ✅ Complete | 10 baddy types, 10 modes (WALK/LOOK/HUNT/HURT/DIE/SWAMPSHOT/HAREJUMP/OCTOSHOT/DEAD), item dropping, props, verses, respawn |
 
 ### 🚧 Partial
 
@@ -89,7 +91,6 @@ How-to setup a server:
 | .zelda Level Parsing | ❌ Pending | .zelda format with RLE compression |
 | Level Board Data | ❌ Pending | .nw BOARD token parsing |
 | File Transfers | ❌ Pending | Upload/download system |
-| Word Filter | ❌ Pending | Chat filtering system |
 
 **Note:** V8 is used ONLY for server-side script execution. Client-side GS2 scripts continue to work with the existing GS2 compiler - no changes to client-side script handling. A server-side GS2 compiler has not been implemented yet.
 
