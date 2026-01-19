@@ -6149,15 +6149,21 @@ func (sl *ServerList) sendPlayers() {
 			buf = NewBuffer()
 			buf.WriteGChar(SVO_PLYRADD)
 			buf.WriteGShort(uint16(player.id))
-			buf.WriteByte(byte(player.playerType))
-			buf.WriteByte(PLPROP_ACCOUNTNAME).WriteString8Encoded(player.accountName)
-			buf.WriteByte(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
-			buf.WriteByte(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
-			buf.WriteByte(PLPROP_X).WriteGString(strconv.Itoa(int(player.x)))
-			buf.WriteByte(PLPROP_Y).WriteGString(strconv.Itoa(int(player.y)))
-			buf.WriteByte(PLPROP_ALIGNMENT).WriteGString(strconv.Itoa(player.alignment))
-			buf.WriteByte(PLPROP_IPADDR).WriteGString(player.accountIpStr)
-			sl.sendPacket(buf.Bytes())
+			buf.WriteGChar(byte(player.playerType))
+			buf.WriteGChar(PLPROP_ACCOUNTNAME).WriteString8Encoded(player.accountName)
+			buf.WriteGChar(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
+			buf.WriteGChar(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
+			buf.WriteGChar(PLPROP_X).WriteGString(strconv.Itoa(int(player.x)))
+			buf.WriteGChar(PLPROP_Y).WriteGString(strconv.Itoa(int(player.y)))
+			buf.WriteGChar(PLPROP_ALIGNMENT).WriteGString(strconv.Itoa(player.alignment))
+			buf.WriteGChar(PLPROP_IPADDR).WriteGString(player.accountIpStr)
+			packetBytes := buf.Bytes()
+			hexOut := ""
+			for i, b := range packetBytes {
+				if i < 50 { hexOut += fmt.Sprintf("%02X ", b) } else { hexOut += "..."; break }
+			}
+			sl.server.logger.Debug("[LISTSERVER] SVO_PLYRADD packet bytes: %s", hexOut)
+			sl.sendPacket(packetBytes)
 		}
 	}
 }
@@ -6166,14 +6172,14 @@ func (sl *ServerList) AddPlayer(player *Player) {
 	buf := NewBuffer()
 	buf.WriteGChar(SVO_PLYRADD)
 	buf.WriteGShort(uint16(player.id))
-	buf.WriteByte(byte(player.playerType))
-	buf.WriteByte(PLPROP_ACCOUNTNAME).WriteString8Encoded(player.accountName)
-	buf.WriteByte(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
-	buf.WriteByte(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
-	buf.WriteByte(PLPROP_X).WriteGString(strconv.Itoa(int(player.x)))
-	buf.WriteByte(PLPROP_Y).WriteGString(strconv.Itoa(int(player.y)))
-	buf.WriteByte(PLPROP_ALIGNMENT).WriteGString(strconv.Itoa(player.alignment))
-	buf.WriteByte(PLPROP_IPADDR).WriteGString(player.accountIpStr)
+	buf.WriteGChar(byte(player.playerType))
+	buf.WriteGChar(PLPROP_ACCOUNTNAME).WriteString8Encoded(player.accountName)
+	buf.WriteGChar(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
+	buf.WriteGChar(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
+	buf.WriteGChar(PLPROP_X).WriteGString(strconv.Itoa(int(player.x)))
+	buf.WriteGChar(PLPROP_Y).WriteGString(strconv.Itoa(int(player.y)))
+	buf.WriteGChar(PLPROP_ALIGNMENT).WriteGString(strconv.Itoa(player.alignment))
+	buf.WriteGChar(PLPROP_IPADDR).WriteGString(player.accountIpStr)
 	sl.SendPacket(buf.Bytes())
 }
 func (sl *ServerList) DeletePlayer(player *Player) {

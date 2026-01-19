@@ -5,6 +5,11 @@
 #startx = 30
 #starty = 30.5
 
+# Enable verbose packet/logging debug output.
+# When true, logs all packet bytes, compression info, and protocol details.
+# When false (default), only shows normal info like logins, disconnects, errors.
+debugmode = true
+
 # Specifies where players go when they say "unstick me".
 unstickmelevel = onlinestartlocal.nw
 unstickmex = 30
@@ -143,9 +148,9 @@ minimap =
 # --- Private server options.  The changestaffacct right is required to alter these. ---
 # --------------------------------------------------------------------------------------
 # The server details seen from the server list.
-name = Go Server
+name = Orion
 description = Go Code GServer
-url = http://www.graal.in/
+url = https://github.com/Denveous/gserver-go
 
 # The information of the computer hosting the gserver.  This gets sent to people wanting to connect.
 # If myip is set to AUTO, it uses the IP address exposed to the list server.
@@ -178,7 +183,7 @@ oldcreated = true
 
 # Determines whether the server handles certain things like signs and links.
 # Don't set to true.
-serverside = false
+serverside = true
 
 # Enables triggeraction hacks.
 triggerhack_weapons = false	# gr.addweapon, gr.deleteweapon
