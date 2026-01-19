@@ -8,18 +8,24 @@ var serverDir=flag.String("server","","")
 var serverName=flag.String("name","","")
 var port=flag.String("port","","")
 var serverIP,localIP,serverInterface string
+var mainLogger *Logger
 func init(){
 	flag.StringVar(&serverIP,"serverip","","")
 	flag.StringVar(&localIP,"localip","","")
 	flag.StringVar(&serverInterface,"interface","","")
 }
 func formatTime() string { return time.Now().Format("[03:04 PM] ") }
-func logServer(msg string) { fmt.Printf("%s%s\n", formatTime(), msg) }
+func logServer(msg string) {
+	if mainLogger != nil { mainLogger.Write(msg) } else { fmt.Printf("%s%s\n", formatTime(), msg) }
+}
 func main(){
 	flag.Parse()
+	mainLogger = NewLogger("", true)
+	mainLogger.Open("GServer.log")
 	serverlog:=fmt.Sprintf("%s %s\n%s\n\n", APP_VENDOR, APP_NAME, APP_VERSION)
 	serverlog+=fmt.Sprintf("Programmed by %s.\n\n", APP_CREDITS)
 	fmt.Print(serverlog)
+	mainLogger.Write(serverlog)
 	server:="default"
 	if *serverDir!=""{ server=*serverDir }else{
 		logServer(":: Determining the server to start... ")
@@ -39,7 +45,7 @@ func main(){
 	}
 	srv:=NewServer("GServer-Go")
 	srv.config.basePath="servers/"+server+"/"
-	srv.logger.Open("GServer.log")
+	srv.logger = mainLogger
 	srv.logger.Write(":: Starting server: %s.", server)
 	if err:=srv.Init(serverIP,*port,localIP,serverInterface);err!=nil{ fmt.Printf("** [Error] Failed to start server: %s: %v\n", server, err); os.Exit(1) }
 	srv.loadSettings()
