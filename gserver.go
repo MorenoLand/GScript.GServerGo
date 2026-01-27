@@ -106,8 +106,8 @@ func (s *Server) initNPCServer() {
 	p.lastMovement = time.Now()
 	p.lastSave = time.Now()
 	p.last1m = time.Now()
-	p.x = 60
-	p.y = 61
+	p.x = 0
+	p.y = 0
 	p.alignment = 50
 	s.playerMu.Lock()
 	s.players[p.id] = p
@@ -6219,10 +6219,10 @@ func (sl *ServerList) sendPlayers() {
 			sl.server.logger.Info("[LISTSERVER] Buffer before nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
 			buf.WriteGChar(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
 			sl.server.logger.Info("[LISTSERVER] Buffer after nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
-			buf.WriteGChar(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
-			buf.WriteGChar(PLPROP_X).WriteGString(strconv.Itoa(int(player.x)))
-			buf.WriteGChar(PLPROP_Y).WriteGString(strconv.Itoa(int(player.y)))
-			buf.WriteGChar(PLPROP_ALIGNMENT).WriteGString(strconv.Itoa(player.alignment))
+			buf.WriteGChar(PLPROP_CURLEVEL).WriteGChar(1).WriteByte(' ')
+			buf.WriteGChar(PLPROP_X).WriteGChar(byte(player.x / 8))
+			buf.WriteGChar(PLPROP_Y).WriteGChar(byte(player.y / 8))
+			buf.WriteGChar(PLPROP_ALIGNMENT).WriteGChar(byte(player.alignment))
 			buf.WriteGChar(PLPROP_IPADDR).WriteGString(player.accountIpStr)
 			packetBytes := buf.Bytes()
 			var hexStr string
@@ -6247,9 +6247,9 @@ func (sl *ServerList) AddPlayer(player *Player) {
 	buf.WriteGChar(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
 	sl.server.logger.Info("[LISTSERVER] Buffer after nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
 	buf.WriteGChar(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
-	buf.WriteGChar(PLPROP_X).WriteGString(strconv.Itoa(int(player.x)))
-	buf.WriteGChar(PLPROP_Y).WriteGString(strconv.Itoa(int(player.y)))
-	buf.WriteGChar(PLPROP_ALIGNMENT).WriteGString(strconv.Itoa(player.alignment))
+	buf.WriteGChar(PLPROP_X).WriteGChar(byte(player.x / 8))
+	buf.WriteGChar(PLPROP_Y).WriteGChar(byte(player.y / 8))
+	buf.WriteGChar(PLPROP_ALIGNMENT).WriteGChar(byte(player.alignment))
 	buf.WriteGChar(PLPROP_IPADDR).WriteGString(player.accountIpStr)
 	packetBytes := buf.Bytes()
 	sl.server.logger.Info("[LISTSERVER] PLYRADD packet (%d bytes): %v", len(packetBytes), packetBytes)

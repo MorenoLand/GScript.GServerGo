@@ -1,3 +1,4 @@
 nul
+*.bat
 *.exe
-GServer.log
+*.log
