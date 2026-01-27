@@ -732,12 +732,15 @@ type Account struct {
 	alignment                                                                                    int
 	eloRating, eloDeviation                                                                      float32
 	maxHitpoints, mp, apCounter, horseBombCount                                                  uint8
-	kills, deaths, additionalFlags                                                               uint32
+	kills, deaths, additionalFlags, rupees                                                       uint32
 	carrySprite                                                                                  int8
 	onlineTime, status, udpport                                                                  int
 	lastSparTime                                                                                 time.Time
 	attachNPC                                                                                    uint32
-	statusMsg                                                                                    uint8
+	statusMsg                                                                                    string
+	gAttribs                                                                                     [30]string
+	os                                                                                           string
+	envCodePage                                                                                  int
 	flagList                                                                                     map[string]string
 	chestList, folderList, weaponList, privateMessageServerList                                  []string
 	folderRights                                                                                 FilePermissions
@@ -1457,6 +1460,11 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.eloRating = 1500.0
 	p.eloDeviation = 350.0
 	p.onlineTime = 0
+	p.rupees = 50
+	p.statusMsg = ""
+	p.os = "wind"
+	p.envCodePage = 1252
+	for i := range p.gAttribs { p.gAttribs[i] = "" }
 	p.flagList = make(map[string]string)
 	p.weaponList = []string{}
 	p.chestList = []string{}
@@ -1501,17 +1509,8 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.server.logger.Info("Creating new account from default: %s", account)
 		p.SaveAccount()
 	}
-	p.server.logger.Info("Sending PLO_OTHERPLPROPS (login props)...")
-	buf = NewBuffer()
-	buf.WriteByte(PLO_OTHERPLPROPS).WriteGShort(p.id)
-	buf.WriteGString(p.character.nickName).WriteGString(p.character.gani)
-	buf.WriteGString(p.character.bodyImage).WriteGString(p.character.headImage)
-	buf.WriteGString(p.character.swordImage).WriteGString(p.character.shieldImage)
-	buf.WriteGString(p.character.horseImage).WriteGByte(p.character.sprite)
-	for i := 0; i < 5; i++ { buf.WriteGByte(p.character.colors[i]) }
-	buf.WriteGInt(uint32(p.x)).WriteGInt(uint32(p.y)).WriteGInt(uint32(p.z))
-	buf.WriteGString(p.levelName)
-	p.send(buf)
+	p.server.logger.Info("Sending login props (PLO_PLAYERPROPS)...")
+	p.sendProps(sendLoginProps)
 	p.server.logger.Info("Sending PLO_CLEARWEAPONS...")
 	p.sendPLO_CLEARWEAPONS()
 	p.server.logger.Info("Sending player flags...")
@@ -2291,6 +2290,131 @@ func (p *Player) msgPLI_REQUESTUPDATEBOARD(packet []byte) bool {
 	if level, ok := p.server.levels[p.levelName]; ok { for _, change := range level.boardChanges { p.sendPBoardPacket(int16(change.x), int16(change.y), int16(change.width), int16(change.height), bytesToShorts(change.newTiles)) } }
 	return true
 }
+
+// getProp returns property data in the format expected by the client
+func (p *Player) getProp(propId int) []byte {
+	buf := NewBuffer()
+	switch propId {
+	case PLPROP_NICKNAME:
+		buf.WriteGChar(byte(len(p.character.nickName)))
+		buf.data = append(buf.data, p.character.nickName...)
+	case PLPROP_RUPEESCOUNT:
+		buf.WriteGInt(p.rupees)
+	case PLPROP_ARROWSCOUNT:
+		buf.WriteGInt(uint32(p.character.arrows))
+	case PLPROP_BOMBSCOUNT:
+		buf.WriteGInt(uint32(p.character.bombs))
+	case PLPROP_GLOVEPOWER:
+		buf.WriteGChar(byte(p.character.glovePower))
+	case PLPROP_SWORDPOWER:
+		buf.WriteGChar(byte(p.character.swordPower))
+	case PLPROP_SHIELDPOWER:
+		buf.WriteGChar(byte(p.character.shieldPower))
+	case PLPROP_GANI:
+		buf.WriteGChar(byte(len(p.character.gani)))
+		buf.data = append(buf.data, p.character.gani...)
+	case PLPROP_HEADGIF:
+		buf.WriteGChar(byte(len(p.character.headImage)))
+		buf.data = append(buf.data, p.character.headImage...)
+	case PLPROP_COLORS:
+		colors := fmt.Sprintf("%d,%d,%d,%d,%d", p.character.colors[0], p.character.colors[1], p.character.colors[2], p.character.colors[3], p.character.colors[4])
+		buf.WriteGChar(byte(len(colors)))
+		buf.data = append(buf.data, colors...)
+	case PLPROP_ID:
+		buf.WriteGShort(p.id)
+	case PLPROP_X:
+		buf.WriteGChar(byte(p.x / 8))
+	case PLPROP_Y:
+		buf.WriteGChar(byte(p.y / 8))
+	case PLPROP_SPRITE:
+		buf.WriteGChar(p.character.sprite)
+	case PLPROP_STATUS:
+		buf.WriteGShort(uint16(p.status))
+	case PLPROP_CARRYSPRITE:
+		buf.WriteGShort(uint16(p.carrySprite))
+	case PLPROP_CURLEVEL:
+		buf.WriteGChar(byte(len(p.levelName)))
+		buf.data = append(buf.data, p.levelName...)
+	case PLPROP_HORSEGIF:
+		buf.WriteGChar(byte(len(p.character.horseImage)))
+		buf.data = append(buf.data, p.character.horseImage...)
+	case PLPROP_APCOUNTER:
+		buf.WriteGInt(uint32(p.apCounter))
+	case PLPROP_MAGICPOINTS:
+		buf.WriteGInt(uint32(p.mp))
+	case PLPROP_KILLSCOUNT:
+		buf.WriteGInt(p.kills)
+	case PLPROP_DEATHSCOUNT:
+		buf.WriteGInt(p.deaths)
+	case PLPROP_ONLINESECS:
+		buf.WriteGInt(uint32(p.onlineTime))
+	case PLPROP_IPADDR:
+		buf.WriteGString(p.accountIpStr)
+	case PLPROP_UDPPORT:
+		buf.WriteGShort(uint16(p.udpport))
+	case PLPROP_ALIGNMENT:
+		buf.WriteGChar(byte(p.alignment))
+	case PLPROP_ADDITFLAGS:
+		buf.WriteGString("")
+	case PLPROP_ACCOUNTNAME:
+		buf.WriteGChar(byte(len(p.accountName)))
+		buf.data = append(buf.data, p.accountName...)
+	case PLPROP_BODYIMG:
+		buf.WriteGChar(byte(len(p.character.bodyImage)))
+		buf.data = append(buf.data, p.character.bodyImage...)
+	case PLPROP_RATING:
+		buf.WriteGInt(uint32(p.eloRating))
+	case PLPROP_GATTRIB1, PLPROP_GATTRIB2, PLPROP_GATTRIB3, PLPROP_GATTRIB4, PLPROP_GATTRIB5:
+		idx := propId - PLPROP_GATTRIB1
+		if idx < len(p.gAttribs) {
+			buf.WriteGString(p.gAttribs[idx])
+		} else {
+			buf.WriteGString("")
+		}
+	case PLPROP_JOINLEAVELVL:
+		buf.WriteGChar(1)
+	case PLPROP_PCONNECTED:
+		buf.WriteGChar(1)
+	case PLPROP_PLANGUAGE:
+		buf.WriteGString(p.language)
+	case PLPROP_PSTATUSMSG:
+		buf.WriteGString(p.statusMsg)
+	case PLPROP_Z:
+		buf.WriteGShort(uint16(p.z))
+	case PLPROP_COMMUNITYNAME:
+		buf.WriteGString(p.communityName)
+	case PLPROP_OSTYPE:
+		buf.WriteGString(p.os)
+	case PLPROP_TEXTCODEPAGE:
+		buf.WriteGInt(uint32(p.envCodePage))
+	case PLPROP_X2:
+		buf.WriteGShort(uint16(p.x))
+	case PLPROP_Y2:
+		buf.WriteGShort(uint16(p.y))
+	case PLPROP_Z2:
+		buf.WriteGShort(uint16(p.z))
+	default:
+		// For unimplemented properties, return empty
+		buf.WriteGChar(0)
+	}
+	return buf.Bytes()
+}
+
+// sendProps sends properties marked as true in the props array
+func (p *Player) sendProps(props [PROPCOUNT]bool) {
+	buf := NewBuffer()
+	for propId := 0; propId < PROPCOUNT; propId++ {
+		if props[propId] {
+			buf.WriteGChar(byte(propId))
+			propData := p.getProp(propId)
+			buf.data = append(buf.data, propData...)
+		}
+	}
+	if buf.Len() > 0 {
+		p.sendPacket(append([]byte{PLO_PLAYERPROPS}, buf.Bytes()...))
+	}
+}
+
 func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	for buf.BytesLeft() > 0 {
