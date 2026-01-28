@@ -1,4 +1,6 @@
 nul
 *.bat
 *.exe
-*.logprogress.md
+*.log
+progress.md
+PROGRESS.md
