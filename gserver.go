@@ -2479,7 +2479,8 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 		propId := buf.ReadGChar()
 		val := buf.ReadGString()
 		switch propId {
-		case PLPROP_NICKNAME: p.character.nickName = val
+		case PLPROP_NICKNAME:
+			if val != "" && val != "unknown" { p.character.nickName = val }
 		case PLPROP_GANI: p.character.gani = val
 		case PLPROP_BODYIMG: p.character.bodyImage = val
 		case PLPROP_HEADGIF: p.character.headImage = val
