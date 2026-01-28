@@ -1507,7 +1507,7 @@ func (p *Player) handleLogin(packet []byte) bool {
 		unkBuf.WriteByte(PLO_UNKNOWN168)
 		p.send(unkBuf)
 	}
-	if !p.LoadAccount(account, false) {
+	if !p.LoadAccount(account, true) {
 		p.server.logger.Error("Failed to load account for: %s", account)
 		return false
 	}
