@@ -5716,7 +5716,7 @@ func (l *Level) getPlayers() []uint16 {
 }
 func (l *Level) getBoardPacket() []byte {
 	buf := NewBuffer()
-	buf.WriteByte(0)
+	buf.WriteByte(PLO_BOARDPACKET)
 	mainLayer := l.tiles[0]
 	if mainLayer != nil && len(mainLayer.tiles) == 4096 {
 		for i := 0; i < 4096; i++ {
@@ -5727,6 +5727,7 @@ func (l *Level) getBoardPacket() []byte {
 	} else {
 		for i := 0; i < 8192; i++ { buf.WriteByte(0) }
 	}
+	buf.WriteByte('\n')
 	return buf.Bytes()
 }
 func (l *Level) getTileAt(x, y int) int16 {
