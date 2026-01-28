@@ -344,6 +344,15 @@ The gserver will load weapon_bytecode/name_of_file and use the bytecode containe
 
 ## Recent Development
 
+### 2026-01-28
+
+**Dual Encryption Codec System Implementation**
+- Added separate `outEncryption` field to Player struct for independent send/receive encryption states
+- Implemented dual codec initialization matching C++ (m_encryptionCodecIn + m_fileQueue.out_codec)
+- Added comprehensive iterator state logging for debugging encryption sync issues
+- **Current Issue**: Client v2.22 stuck at "loading account..." - decryption produces garbage despite correct codec initialization
+- **Debug Status**: Iterator states logged, investigating client output codec synchronization
+
 ### 2026-01-19
 
 **Critical Fixes: Client Login, Listserver Registration, NPCServer Data**
@@ -391,7 +400,13 @@ All fixes based on direct C++ source analysis in SESSION01/GServer-v2.
 
 ## Known Issues
 
-- ~~Client may hang at "Loading account..."~~ - FIXED (2026-01-19)
+**CRITICAL - Login Encryption (2026-01-28)**
+- Client v2.22 gets stuck at "loading account..."
+- Dual encryption codec system implemented but decryption produces garbage
+- Input/output codecs initialize correctly but client packets don't decrypt properly
+- **Investigation in progress** - See progress.md "WHERE TO CONTINUE FROM" section for details
+
+- ~~Client may hang at "Loading account..."~~ - FIXED (2026-01-19), REGRESSED (2026-01-28)
 - ~~NPCServer data corruption on listserver~~ - FIXED (2026-01-19)
 - ~~Server not appearing on public listserver~~ - FIXED (2026-01-19)
 - Level file loading (.nw/.zelda) implemented, needs client testing

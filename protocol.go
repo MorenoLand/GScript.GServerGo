@@ -503,7 +503,7 @@ const PROPCOUNT = 83
 
 // __sendLogin - which properties to send to client during login (from Player.cpp line 53)
 var sendLoginProps = [PROPCOUNT]bool{
-	false, true, true, true, true, true,    // 0-5
+	true, true, true, true, true, true,    // 0-5
 	true, false, true, true, true, true,    // 6-11
 	false, true, false, false, false, true, // 12-17
 	true, false, false, true, true, true,   // 18-23

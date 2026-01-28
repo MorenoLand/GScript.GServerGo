@@ -1,6 +1,6 @@
 package main
 
-import ("bytes"; "compress/zlib"; "encoding/base64"; "io"; "net"; "sync"; "time")
+import ("bytes"; "compress/zlib"; "encoding/base64"; "fmt"; "io"; "net"; "sync"; "time")
 
 type Buffer struct{ data []byte; read int; write int }
 
@@ -411,3 +411,4 @@ func ZlibCompress(data []byte) ([]byte, error) {
 	w.Close()
 	return buf.Bytes(), nil
 }
+func Bz2Decompress(data []byte) ([]byte, error) { return nil, fmt.Errorf("BZ2 decompression not implemented - use GEN_5+ with ZLIB") }

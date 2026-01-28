@@ -1034,6 +1034,7 @@ type Player struct {
 	recvBuffer                                                                []byte
 	encryptionKey                                                             byte
 	encryption                                                                Encryption
+	outEncryption                                                              Encryption
 	version, os, serverName                                                   string
 	id                                                                        uint16
 	envCodePage                                                               int
@@ -1127,9 +1128,63 @@ func (p *Player) processPackets() {
 			p.server.logger.Debug("Login packet: %d bytes", len(packet))
 			if !p.handleLogin(packet) { p.server.logger.Error("handleLogin returned false"); p.disconnect(); return }
 			p.server.AddPlayer(p, p.id)
+			p.server.logger.Info("Sending PLO_STAFFGUILDS...")
+			staffGuilds := p.server.settings.Get("staffguilds")
+			if staffGuilds != "" {
+				guilds := strings.Split(staffGuilds, ",")
+				buf := NewBuffer()
+				buf.WriteByte(PLO_STAFFGUILDS)
+				for _, guild := range guilds {
+					guild = strings.TrimSpace(guild)
+					if guild != "" {
+						buf.WriteString("\"" + guild + "\",")
+					}
+				}
+				if buf.Len() > 1 {
+					packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
+					p.sendPacket(packet.Bytes())
+				} else {
+					p.sendPacket(buf.Bytes())
+				}
+			}
+			p.server.logger.Info("Sending PLO_STATUSLIST...")
+			statusList := p.server.settings.Get("statuslist")
+			if statusList != "" {
+				statuses := strings.Split(statusList, ",")
+				buf := NewBuffer()
+				buf.WriteByte(PLO_STATUSLIST)
+				for _, status := range statuses {
+					status = strings.TrimSpace(status)
+					if status != "" {
+						buf.WriteString(status + ",")
+					}
+				}
+				if buf.Len() > 1 {
+					packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
+					p.sendPacket(packet.Bytes())
+				} else {
+					p.sendPacket(buf.Bytes())
+				}
+			}
+			p.server.logger.Info("Exchanging player props with existing players...")
+			p.server.playerMu.RLock()
+			for _, other := range p.server.players {
+				if other == nil { continue }
+				if other.id == p.id { continue }
+				if other.playerType&PLTYPE_NC != 0 { continue }
+				if other.conn == nil { continue }
+				if !other.isLoggedIn() { continue }
+				myProps := p.sendPropsWithArray(getLoginProps)
+				if len(myProps) == 0 { continue }
+				other.sendPacket(append([]byte{PLO_PLAYERPROPS}, myProps...))
+				otherProps := other.sendPropsWithArray(getLoginProps)
+				if len(otherProps) == 0 { continue }
+				p.sendPacket(append([]byte{PLO_PLAYERPROPS}, otherProps...))
+			}
+			p.server.playerMu.RUnlock()
 			continue
 		}
-		p.handlePacket(packet)
+		p.handleRawData(packet)
 	}
 }
 
@@ -1414,28 +1469,36 @@ func (p *Player) handleLogin(packet []byte) bool {
 	clientTypeByte := buf.ReadGChar()
 	clientType := 1 << clientTypeByte
 	p.server.logger.Debug("handleLogin: clientTypeByte=%d (raw byte=%d) clientType=%d", clientTypeByte, decompressed[0], clientType)
-	// Check client type - all clients send 9-char version after client type byte
-	if buf.Remaining() < 9 { return false }
-	version := string(buf.data[buf.read : buf.read+9])
-	buf.read += 9
+	// Read encryption key for GEN_4+ clients (key is G-encoded)
+	var encryptionKey byte
+	if clientType&PLTYPE_ANYCLIENT != 0 && clientType != PLTYPE_CLIENT {
+		p.server.logger.Debug("handleLogin: Reading encryption key for GEN_4+ client")
+		if buf.Remaining() < 1 { return false }
+		encryptionKey = buf.ReadGChar()  // ReadGChar decodes G-encoded value
+		p.server.logger.Debug("handleLogin: encryptionKey=%d", encryptionKey)
+	}
+	// Check client type - all clients send 8-char version after client type byte
+	if buf.Remaining() < 8 { return false }
+	version := string(buf.data[buf.read : buf.read+8])
+	buf.read += 8
 	p.server.logger.Debug("handleLogin: version=%q", version)
 	// Read account (GChar length + string)
-	p.server.logger.Debug("handleLogin: Remaining after version: %d bytes", buf.Remaining())
-	if buf.Remaining() < 1 { p.server.logger.Debug("handleLogin: FAIL - not enough bytes for accLen"); return false }
-	accLenRaw := buf.data[buf.read]
-	accLen := buf.ReadGChar()
-	p.server.logger.Debug("handleLogin: accLenRaw=%d (0x%02X), accLen=%d, remaining after GChar: %d", accLenRaw, accLenRaw, accLen, buf.Remaining())
-	if buf.Remaining() < int(accLen) { p.server.logger.Debug("handleLogin: FAIL - not enough bytes for account (have %d, need %d)", buf.Remaining(), accLen); return false }
-	account := string(buf.data[buf.read : buf.read+int(accLen)])
-	buf.read += int(accLen)
+	if buf.Remaining() < 1 { return false }
+	accountLen := buf.ReadGChar()
+	if buf.Remaining() < int(accountLen) { return false }
+	accountBytes := make([]byte, accountLen)
+	for i := 0; i < int(accountLen); i++ { accountBytes[i] = buf.ReadByte() }
+	account := string(accountBytes)
 	// Read password (GChar length + string)
-	if buf.Remaining() < 1 { p.server.logger.Debug("handleLogin: FAIL - not enough bytes for passLen (remaining: %d)", buf.Remaining()); return false }
-	passLen := buf.ReadGChar()
-	p.server.logger.Debug("handleLogin: passLen=%d", passLen)
-	if buf.Remaining() < int(passLen) { p.server.logger.Debug("handleLogin: FAIL - not enough bytes for password (have %d, need %d)", buf.Remaining(), passLen); return false }
-	password := string(buf.data[buf.read : buf.read+int(passLen)])
-	buf.read += int(passLen)
-	p.server.logger.Debug("handleLogin: account=%s password=%s", account, password)
+	if buf.Remaining() < 1 { return false }
+	passwordLen := buf.ReadGChar()
+	if buf.Remaining() < int(passwordLen) { return false }
+	passwordBytes := make([]byte, passwordLen)
+	for i := 0; i < int(passwordLen); i++ { passwordBytes[i] = buf.ReadByte() }
+	password := string(passwordBytes)
+	// Read client identity (raw string until newline)
+	identity := buf.ReadString()
+	p.server.logger.Debug("handleLogin: account=%s password=%s identity=%s", account, password, identity)
 	p.playerType = clientType
 	p.setAccountName(account)
 	p.setNickname(account)
@@ -1495,6 +1558,16 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.server.logger.Debug("Matched default case")
 		p.encryption.gen = ENCRYPT_GEN_3
 	}
+	// Initialize encryption with key for GEN_4+ clients
+	if p.encryption.gen > ENCRYPT_GEN_3 && encryptionKey != 0 {
+		p.server.logger.Debug("Initializing encryption with key=%d", encryptionKey)
+		p.encryption.Reset(encryptionKey)
+		// Initialize output codec with same key and generation
+		p.outEncryption.SetGen(p.encryption.GetGen())
+		p.outEncryption.Reset(encryptionKey)
+		p.server.logger.Debug("Initialized inEncryption gen=%d key=%d iterator=%08X", p.encryption.gen, encryptionKey, p.encryption.iterator)
+		p.server.logger.Debug("Initialized outEncryption gen=%d key=%d iterator=%08X", p.outEncryption.gen, encryptionKey, p.outEncryption.iterator)
+	}
 	p.server.logger.Info("Setting encryption gen to %d (ENCRYPT_GEN_3=%d) for client type %d", p.encryption.gen, ENCRYPT_GEN_3, clientType)
 	sigBuf := NewBuffer()
 	sigBuf.WriteByte(PLO_SIGNATURE).WriteByte(73)
@@ -1539,8 +1612,16 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.sendPLO_FLAGSET(flag, value)
 	}
 	p.server.logger.Info("Deleting default weapons...")
-	p.sendPLO_NPCWEAPONDEL(100)
-	p.sendPLO_NPCWEAPONDEL(101)
+	p.sendPLO_NPCWEAPONDEL("Bomb")
+	p.sendPLO_NPCWEAPONDEL("Bow")
+	p.server.logger.Info("Sending weapons...")
+	// TODO: Weapon system not fully implemented yet
+	// for _, weaponName := range p.weaponList {
+	// 	weapon := p.server.weapons[weaponName]
+	// 	if weapon == nil { continue }
+	// 	p.server.logger.Debug("Sending weapon: %s", weaponName)
+	// 	p.sendWeapon(weapon, 1000+uint32(len(weaponName)))
+	// }
 	p.server.logger.Info("Sending PLO_UNKNOWN190...")
 	p.sendPLO_UNKNOWN190()
 	startLevel := p.server.settings.Get("startlevel")
@@ -1553,9 +1634,12 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.server.logger.Info("Warping player to '%s'...", startLevel)
 	p.warp(startLevel, 32, 32)
 	p.server.logger.Info("Sending weapons...")
-	for name, weapon := range p.server.weapons {
-		p.server.logger.Debug("Sending weapon: %s", name)
-		p.sendWeapon(weapon, 1000+uint32(len(name)))
+	for _, weaponName := range p.weaponList {
+		if strings.HasPrefix(weaponName, "-") { continue }
+		weapon := p.server.weapons[weaponName]
+		if weapon == nil { continue }
+		p.server.logger.Debug("Sending weapon: %s", weaponName)
+		p.sendWeapon(weapon, 1000+uint32(len(weaponName)))
 	}
 	p.server.logger.Info("Sending PLO_BIGMAP...")
 	bigmap := p.server.settings.Get("bigmap")
@@ -1576,86 +1660,60 @@ func (p *Player) handleLogin(packet []byte) bool {
 	buf.WriteByte(PLO_SERVERTEXT)
 	p.send(buf)
 	p.sendPLO_LISTPROCESSES()
-	p.server.logger.Info("Sending PLO_STAFFGUILDS...")
-	staffGuilds := p.server.settings.Get("staffguilds")
-	if staffGuilds != "" {
-		guilds := strings.Split(staffGuilds, ",")
-		buf := NewBuffer()
-		buf.WriteByte(PLO_STAFFGUILDS)
-		for _, guild := range guilds {
-			guild = strings.TrimSpace(guild)
-			if guild != "" {
-				buf.WriteString("\"" + guild + "\",")
-			}
-		}
-		if buf.Len() > 1 {
-			packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
-			p.sendPacket(packet.Bytes())
-		} else {
-			p.sendPacket(buf.Bytes())
-		}
-	}
-	p.server.logger.Info("Sending PLO_STATUSLIST...")
-	statusList := p.server.settings.Get("statuslist")
-	if statusList != "" {
-		statuses := strings.Split(statusList, ",")
-		buf := NewBuffer()
-		buf.WriteByte(PLO_STATUSLIST)
-		for _, status := range statuses {
-			status = strings.TrimSpace(status)
-			if status != "" {
-				buf.WriteString(status + ",")
-			}
-		}
-		if buf.Len() > 1 {
-			packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
-			p.sendPacket(packet.Bytes())
-		} else {
-			p.sendPacket(buf.Bytes())
-		}
-	}
-	p.server.logger.Info("Exchanging player props with existing players...")
-	p.server.playerMu.RLock()
-	for _, other := range p.server.players {
-		if other == nil { continue }
-		if other.id == p.id { continue }
-		if other.playerType&PLTYPE_NC != 0 { continue }
-		if other.conn == nil { continue }
-		myProps := p.sendPropsWithArray(getLoginProps)
-		if len(myProps) == 0 { continue }
-		other.sendPacket(myProps)
-		otherProps := other.sendPropsWithArray(getLoginProps)
-		if len(otherProps) == 0 { continue }
-		p.sendPacket(otherProps)
-	}
-	p.server.playerMu.RUnlock()
 	p.sendCompress(true)
 	p.server.logger.Info("[%s] Player logged in (type=%d)", account, clientType)
 	return true
 }
 
 func (p *Player) handleRawData(data []byte) {
-	if len(data) == 0 {
-		return
-	}
-	p.encryption.Decrypt(data)
-	if p.encryption.gen == ENCRYPT_GEN_4 || p.encryption.gen >= ENCRYPT_GEN_5 {
-		if len(data) > 0 {
-			p.handlePacket(data)
+	if len(data) == 0 { return }
+	p.server.logger.Debug("handleRawData: RAW data: % X (gen=%d)", data, p.encryption.gen)
+	var decompressed []byte
+	var err error
+	if p.encryption.gen == ENCRYPT_GEN_4 {
+		p.server.logger.Debug("handleRawData: GEN_4 - decrypting and decompressing with BZ2")
+		p.encryption.limit = 4  // COMPRESS_BZ2 limit
+		p.encryption.Decrypt(data)
+		decompressed, err = Bz2Decompress(data)
+		if err != nil { p.server.logger.Debug("handleRawData: BZ2 decompress failed: %v", err); return }
+	} else if p.encryption.gen >= ENCRYPT_GEN_5 {
+		if len(data) < 1 { return }
+		compressType := data[0]
+		encryptedData := data[1:]
+		p.server.logger.Debug("handleRawData: GEN_5+ - compressType=%d, encrypted data: % X", compressType, encryptedData)
+		// Set encryption limit based on compression type
+		limits := map[uint8]int32{COMPRESS_UNCOMPRESSED: 12, COMPRESS_ZLIB: 4, COMPRESS_BZ2: 4}
+		if limit, ok := limits[compressType]; ok {
+			p.encryption.limit = limit
+		}
+		p.server.logger.Debug("handleRawData: BEFORE decrypt - iterator=%08X limit=%d", p.encryption.iterator, p.encryption.limit)
+		p.encryption.Decrypt(encryptedData)
+		p.server.logger.Debug("handleRawData: AFTER decrypt - iterator=%08X data: % X", p.encryption.iterator, encryptedData)
+		if compressType == COMPRESS_ZLIB {
+			decompressed, err = ZlibDecompress(encryptedData)
+			if err != nil { p.server.logger.Debug("handleRawData: ZLIB decompress failed: %v", err); return }
+		} else if compressType == COMPRESS_BZ2 {
+			decompressed, err = Bz2Decompress(encryptedData)
+			if err != nil { p.server.logger.Debug("handleRawData: BZ2 decompress failed: %v", err); return }
+		} else if compressType == COMPRESS_UNCOMPRESSED {
+			decompressed = encryptedData
+		} else {
+			p.server.logger.Debug("handleRawData: Unknown compression type %d", compressType)
+			return
 		}
 	} else {
+		p.server.logger.Debug("handleRawData: GEN_1-3 - using newline delimiter")
 		for len(data) > 0 {
 			newline := bytes.IndexByte(data, '\n')
-			if newline == -1 {
-				break
-			}
+			if newline == -1 { break }
 			packet := data[:newline]
 			data = data[newline+1:]
-			if len(packet) > 0 {
-				p.handlePacket(packet)
-			}
+			if len(packet) > 0 { p.handlePacket(packet) }
 		}
+		return
 	}
+	p.server.logger.Debug("handleRawData: DECOMPRESSED data: % X", decompressed)
+	if len(decompressed) > 0 { p.handlePacket(decompressed) }
 }
 func (p *Player) sendPacket(packet []byte) {
 	if len(packet) == 0 { return }
@@ -1704,12 +1762,14 @@ func (p *Player) sendPacket(packet []byte) {
 			compressed = packet
 		}
 		// Set encryption limit based on compression type
-		limits := map[uint8]int32{COMPRESS_UNCOMPRESSED: 40, COMPRESS_ZLIB: 4096}
+		limits := map[uint8]int32{COMPRESS_UNCOMPRESSED: 12, COMPRESS_ZLIB: 4}
 		if limit, ok := limits[compressionType]; ok {
-			p.encryption.limit = limit
+			p.outEncryption.limit = limit
 		}
-		// Encrypt the compressed data
-		encrypted := p.encryption.Encrypt(compressed)
+		// Encrypt the compressed data with OUTPUT codec
+		p.server.logger.Debug("sendPacket: BEFORE encrypt - outIterator=%08X limit=%d", p.outEncryption.iterator, p.outEncryption.limit)
+		encrypted := p.outEncryption.Encrypt(compressed)
+		p.server.logger.Debug("sendPacket: AFTER encrypt - outIterator=%08X", p.outEncryption.iterator)
 		// Build packet: [length_lo][length_hi][compression_type][encrypted...]
 		totalLen := 2 + 1 + len(encrypted)
 		if totalLen > 0xFFFE {
@@ -1821,16 +1881,7 @@ func (p *Player) parseProps(props []byte) {
 }
 
 func (p *Player) sendPLO_PLAYERPROPS() bool {
-	buf := NewBuffer()
-	buf.WriteByte(PLO_PLAYERPROPS).WriteGShort(p.id)
-	buf.WriteGString(p.character.nickName).WriteGString(p.character.gani)
-	buf.WriteGString(p.character.bodyImage).WriteGString(p.character.headImage)
-	buf.WriteGString(p.character.swordImage).WriteGString(p.character.shieldImage)
-	buf.WriteGString(p.character.horseImage).WriteGByte(p.character.sprite)
-	for i := 0; i < 5; i++ { buf.WriteGByte(p.character.colors[i]) }
-	buf.WriteGInt(uint32(p.x)).WriteGInt(uint32(p.y)).WriteGInt(uint32(p.z))
-	buf.WriteGString(p.levelName)
-	p.send(buf)
+	p.sendProps(getLoginProps)
 	return true
 }
 func (p *Player) sendPLO_PLAYERWARP(x, y, z int16, levelName string) bool {
@@ -2098,9 +2149,9 @@ func (p *Player) sendPLO_NPCWEAPONADD(weaponId uint32, image string, owner strin
 	p.send(buf)
 	return true
 }
-func (p *Player) sendPLO_NPCWEAPONDEL(weaponId uint32) bool {
+func (p *Player) sendPLO_NPCWEAPONDEL(weaponName string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_NPCWEAPONDEL).WriteGInt(weaponId)
+	buf.WriteByte(PLO_NPCWEAPONDEL).WriteString(weaponName)
 	p.send(buf)
 	return true
 }
@@ -2454,7 +2505,7 @@ func (p *Player) sendProps(props [PROPCOUNT]bool) {
 	buf := NewBuffer()
 	for propId := 0; propId < PROPCOUNT; propId++ {
 		if props[propId] {
-			buf.WriteGChar(byte(propId))
+			buf.WriteByte(byte(propId))
 			propData := p.getProp(propId)
 			buf.data = append(buf.data, propData...)
 		}
@@ -2469,7 +2520,7 @@ func (p *Player) sendPropsWithArray(props [PROPCOUNT]bool) []byte {
 	buf := NewBuffer()
 	for propId := 0; propId < PROPCOUNT; propId++ {
 		if props[propId] {
-			buf.WriteGChar(byte(propId))
+			buf.WriteByte(byte(propId))
 			propData := p.getProp(propId)
 			buf.data = append(buf.data, propData...)
 		}
@@ -2478,10 +2529,13 @@ func (p *Player) sendPropsWithArray(props [PROPCOUNT]bool) []byte {
 }
 
 func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
+	p.server.logger.Debug("msgPLI_PLAYERPROPS: Processing %d bytes from %s", len(packet), p.accountName)
+	p.server.logger.Debug("msgPLI_PLAYERPROPS: Raw packet bytes: % X", packet)
 	buf := NewBufferFromBytes(packet[1:])
 	for buf.BytesLeft() > 0 {
 		propId := buf.ReadGChar()
 		val := buf.ReadGString()
+		p.server.logger.Debug("msgPLI_PLAYERPROPS: propId=%d (raw) decoded=%d val=%q", propId+32, propId, val)
 		switch propId {
 		case PLPROP_NICKNAME:
 			if val != "" && val != "unknown" { p.character.nickName = val }
@@ -2498,8 +2552,14 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 		case PLPROP_SPRITE: p.character.sprite = uint8(atoi(val))
 		}
 	}
-	p.sendPLO_PLAYERPROPS()
-	for _, pl := range p.server.players { if pl != p && pl.isLoggedIn() && pl.levelName == p.levelName && pl.conn != nil { pl.sendPLO_OTHERPLPROPS(p) } }
+	// Forward updated props to other players (PLO_OTHERPLPROPS)
+	p.server.logger.Debug("msgPLI_PLAYERPROPS: Forwarding to other players in level %s", p.levelName)
+	for _, pl := range p.server.players {
+		if pl != p && pl.isLoggedIn() && pl.levelName == p.levelName && pl.conn != nil {
+			pl.sendPLO_OTHERPLPROPS(p)
+		}
+	}
+	p.server.logger.Debug("msgPLI_PLAYERPROPS: Done processing")
 	return true
 }
 func (p *Player) msgPLI_NPCPROPS(packet []byte) bool {
