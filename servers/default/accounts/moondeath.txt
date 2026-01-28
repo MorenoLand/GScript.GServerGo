@@ -1,6 +1,6 @@
 GRACC001
 NAME moondeath
-NICK unknown
+NICK moondeath
 COMMUNITYNAME moondeath
 LEVEL onlinestartlocal.nw
 X 30.00
