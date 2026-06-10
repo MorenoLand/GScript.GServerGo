@@ -21,37 +21,37 @@ var DEBUG_MODE bool = false
 
 // ============ SERVER ============
 type Server struct {
-	name           string
-	running        bool
-	config         *FileSystem
-	settings       *Settings
-	adminSettings  *Settings
-	logger         *Logger
-	socketMgr      *SocketManager
-	listener       net.Listener
-	players        map[uint16]*Player
-	playerMu       sync.RWMutex
-	playerIdGen    uint16
-	levels         map[string]*Level
-	levelMu        sync.RWMutex
-	npcs           map[uint32]*NPC
-	npcMu          sync.RWMutex
-	npcIdGen       uint32
-	weapons        map[string]*Weapon
-	classes        map[string]*ScriptClass
-	weaponMu       sync.RWMutex
-	flags          map[string]string
-	flagMu         sync.RWMutex
-	serverList     *ServerList
+	name            string
+	running         bool
+	config          *FileSystem
+	settings        *Settings
+	adminSettings   *Settings
+	logger          *Logger
+	socketMgr       *SocketManager
+	listener        net.Listener
+	players         map[uint16]*Player
+	playerMu        sync.RWMutex
+	playerIdGen     uint16
+	levels          map[string]*Level
+	levelMu         sync.RWMutex
+	npcs            map[uint32]*NPC
+	npcMu           sync.RWMutex
+	npcIdGen        uint32
+	weapons         map[string]*Weapon
+	classes         map[string]*ScriptClass
+	weaponMu        sync.RWMutex
+	flags           map[string]string
+	flagMu          sync.RWMutex
+	serverList      *ServerList
 	triggerCommands map[string]func(*Player, []string) bool
-	serverMessage  string
-	serverTime     uint
-	startTime      time.Time
-	lastTimer      time.Time
-	last1mTimer    time.Time
-	last5mTimer    time.Time
-	shutdown       chan struct{}
-	wordFilter     *WordFilter
+	serverMessage   string
+	serverTime      uint
+	startTime       time.Time
+	lastTimer       time.Time
+	last1mTimer     time.Time
+	last5mTimer     time.Time
+	shutdown        chan struct{}
+	wordFilter      *WordFilter
 }
 
 func NewServer(name string) *Server {
@@ -74,16 +74,30 @@ func NewServer(name string) *Server {
 
 func (s *Server) Init(serverIP, serverPort, localIP, serverInterface string) error {
 	s.log(":: Initializing player listen socket.\n")
-	if serverIP != "" { s.settings.Set("serverip", serverIP) }
-	if serverPort != "" { s.settings.Set("serverport", serverPort) }
-	if localIP != "" { s.settings.Set("localip", localIP) }
-	if serverInterface != "" { s.settings.Set("serverinterface", serverInterface) }
+	if serverIP != "" {
+		s.settings.Set("serverip", serverIP)
+	}
+	if serverPort != "" {
+		s.settings.Set("serverport", serverPort)
+	}
+	if localIP != "" {
+		s.settings.Set("localip", localIP)
+	}
+	if serverInterface != "" {
+		s.settings.Set("serverinterface", serverInterface)
+	}
 	s.loadConfigFiles()
-	if s.settings.GetBool("serverside", false) { s.initNPCServer() }
+	if s.settings.GetBool("serverside", false) {
+		s.initNPCServer()
+	}
 	addr := ":14802"
-	if port := s.settings.Get("serverport"); port != "" { addr = ":" + port }
+	if port := s.settings.Get("serverport"); port != "" {
+		addr = ":" + port
+	}
 	listener, err := net.Listen("tcp", addr)
-	if err != nil { return fmt.Errorf("failed to listen on %s: %w", addr, err) }
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+	}
 	s.listener = listener
 	return nil
 }
@@ -96,9 +110,13 @@ func (s *Server) initNPCServer() {
 	p.accountName = "(npcserver)"
 	p.id = 1
 	p.character.headImage = s.settings.Get("staffhead")
-	if p.character.headImage == "" { p.character.headImage = "head25.png" }
+	if p.character.headImage == "" {
+		p.character.headImage = "head25.png"
+	}
 	nickName := s.settings.Get("nickname")
-	if nickName == "" { nickName = "NPC-Server" }
+	if nickName == "" {
+		nickName = "NPC-Server"
+	}
 	nickName += " (Server)"
 	p.character.nickName = nickName
 	p.levelName = ""
@@ -146,7 +164,9 @@ func (s *Server) Stop() {
 
 func (s *Server) nextPlayerId() uint16 {
 	s.playerIdGen++
-	if s.playerIdGen < 2 { s.playerIdGen = 2 }
+	if s.playerIdGen < 2 {
+		s.playerIdGen = 2
+	}
 	return s.playerIdGen
 }
 
@@ -186,7 +206,9 @@ func (s *Server) doTimedEvents() bool {
 func (s *Server) updateServerTime() { s.serverTime++ }
 
 func (s *Server) oneSecondEvents() {
-	if s.serverList != nil { s.serverList.doTimedEvents() }
+	if s.serverList != nil {
+		s.serverList.doTimedEvents()
+	}
 	s.npcMu.Lock()
 	for _, npc := range s.npcs {
 		if npc.timeout > 0 {
@@ -212,51 +234,69 @@ func (s *Server) fiveMinuteEvents() {
 }
 
 func (s *Server) log(msg string) { s.logger.Write(msg) }
-func (s *Server) loadSettings(){
+func (s *Server) loadSettings() {
 	if err := s.settings.Load(s.config.ResolvePath("config/serveroptions.txt")); err != nil {
 		s.logger.Error("Could not open config/serveroptions.txt. Will use default config.")
 	}
 	DEBUG_MODE = s.settings.GetBool("debugmode", false)
 }
-func (s *Server) loadAdminSettings(){
+func (s *Server) loadAdminSettings() {
 	if err := s.adminSettings.Load(s.config.ResolvePath("config/adminconfig.txt")); err != nil {
 		s.logger.Error("Could not open config/adminconfig.txt. Will use default config.\n")
 	}
 }
-func (s *Server) loadAllowedVersions(){}
-func (s *Server) loadFileSystem(){
-	if s.settings.GetBool("nofoldersconfig", false) { return }
+func (s *Server) loadAllowedVersions() {}
+func (s *Server) loadFileSystem() {
+	if s.settings.GetBool("nofoldersconfig", false) {
+		return
+	}
 	lines, err := s.config.LoadFileAsLines("config/foldersconfig.txt")
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	for _, line := range lines {
-		line=trimSpace(line)
-		if line==""||line[0]=='#'||line[0]=='/'{ continue }
-		parts:=strings.Fields(line)
-		if len(parts)<2{ continue }
-		folderType:=parts[0]
-		config:=strings.Join(parts[1:], " ")
-		lastSlash:=strings.LastIndex(config, "\\")
-		if lastSlash==-1{ lastSlash=strings.LastIndex(config, "/") }
-		if lastSlash!=-1{
-			folder:="world/"+config[:lastSlash+1]
-			wildcard:=config[lastSlash+1:]
+		line = trimSpace(line)
+		if line == "" || line[0] == '#' || line[0] == '/' {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		folderType := parts[0]
+		config := strings.Join(parts[1:], " ")
+		lastSlash := strings.LastIndex(config, "\\")
+		if lastSlash == -1 {
+			lastSlash = strings.LastIndex(config, "/")
+		}
+		if lastSlash != -1 {
+			folder := "world/" + config[:lastSlash+1]
+			wildcard := config[lastSlash+1:]
 			s.log(fmt.Sprintf("        adding %s [%s] to %s\n", folder, wildcard, folderType))
 		}
 	}
 }
-func (s *Server) loadServerMessage(){
-	if data, err := s.config.LoadFile("config/servermessage.html"); err == nil { s.serverMessage = string(data) }
+func (s *Server) loadServerMessage() {
+	if data, err := s.config.LoadFile("config/servermessage.html"); err == nil {
+		s.serverMessage = string(data)
+	}
 }
-func (s *Server) loadIPBans(){}
-func (s *Server) loadWeapons(print bool){
+func (s *Server) loadIPBans() {}
+func (s *Server) loadWeapons(print bool) {
 	files, err := s.config.ListFiles("weapons/")
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	for _, file := range files {
-		if !strings.HasPrefix(file, "weapon") || !strings.HasSuffix(file, ".txt") { continue }
+		if !strings.HasPrefix(file, "weapon") || !strings.HasSuffix(file, ".txt") {
+			continue
+		}
 		if data, err := s.config.LoadFile("weapons/" + file); err == nil {
 			if weapon := parseWeapon(string(data)); weapon != nil {
 				s.weapons[strings.ToLower(weapon.name)] = weapon
-				if print { s.log("       " + weapon.name + "\n") }
+				if print {
+					s.log("       " + weapon.name + "\n")
+				}
 			}
 		}
 	}
@@ -264,13 +304,17 @@ func (s *Server) loadWeapons(print bool){
 
 func parseWeapon(data string) *Weapon {
 	lines := strings.Split(data, "\n")
-	if len(lines) == 0 || lines[0] != "GRAWP001" { return nil }
+	if len(lines) == 0 || lines[0] != "GRAWP001" {
+		return nil
+	}
 	weapon := &Weapon{}
 	inScript := false
 	var scriptLines []string
 	for i := 1; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 		if inScript {
 			if line == "SCRIPTEND" {
 				inScript = false
@@ -291,14 +335,16 @@ func parseWeapon(data string) *Weapon {
 			inScript = true
 		}
 	}
-	if weapon.name == "" { return nil }
+	if weapon.name == "" {
+		return nil
+	}
 	return weapon
 }
-func (s *Server) loadClasses(print bool){}
-func (s *Server) loadMaps(print bool){}
-func (s *Server) loadNpcs(print bool){}
-func (s *Server) loadTranslations(){}
-func (s *Server) loadWordFilter(){
+func (s *Server) loadClasses(print bool) {}
+func (s *Server) loadMaps(print bool)    {}
+func (s *Server) loadNpcs(print bool)    {}
+func (s *Server) loadTranslations()      {}
+func (s *Server) loadWordFilter() {
 	s.wordFilter.load("config/wordfilter.txt")
 }
 func (s *Server) loadConfigFiles() error {
@@ -310,7 +356,11 @@ func (s *Server) loadConfigFiles() error {
 	s.log("     Loading allowed client versions...\n")
 	s.loadAllowedVersions()
 	s.log("     Folder config: ")
-	if s.settings.GetBool("nofoldersconfig", false) { s.log("disabled\n") }else{ s.log("ENABLED\n") }
+	if s.settings.GetBool("nofoldersconfig", false) {
+		s.log("disabled\n")
+	} else {
+		s.log("ENABLED\n")
+	}
 	s.log("     Loading file system...\n")
 	s.loadFileSystem()
 	s.log("     Loading serverflags.txt...\n")
@@ -331,7 +381,9 @@ func (s *Server) loadConfigFiles() error {
 	s.loadTranslations()
 	s.log("     Loading word filter...\n")
 	s.loadWordFilter()
-	if name := s.settings.Get("name"); name != "" { s.name = name }
+	if name := s.settings.Get("name"); name != "" {
+		s.name = name
+	}
 	s.serverList.enabled = true
 	return nil
 }
@@ -372,7 +424,10 @@ func (s *Server) saveData() { s.saveFlags() }
 func (s *Server) loadLevels() {
 	levelsFolder := "levels/"
 	entries, err := os.ReadDir(s.config.ResolvePath(levelsFolder))
-	if err != nil { s.logger.Warning("Could not read levels folder: %v", err); return }
+	if err != nil {
+		s.logger.Warning("Could not read levels folder: %v", err)
+		return
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() && (strings.HasSuffix(strings.ToLower(entry.Name()), ".nw") || strings.HasSuffix(strings.ToLower(entry.Name()), ".zelda")) {
 			levelName := levelsFolder + entry.Name()
@@ -469,26 +524,34 @@ func (s *Server) accountExists(accountName string) bool {
 
 func (s *Server) initTriggerCommands() {
 	s.triggerCommands["gr.addweapon"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_weapons", false) { return true }
+		if !s.settings.GetBool("triggerhack_weapons", false) {
+			return true
+		}
 		for i := 1; i < len(args); i++ {
 			p.addWeapon(strings.TrimSpace(args[i]))
 		}
 		return true
 	}
 	s.triggerCommands["gr.deleteweapon"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_weapons", false) { return true }
+		if !s.settings.GetBool("triggerhack_weapons", false) {
+			return true
+		}
 		for i := 1; i < len(args); i++ {
 			p.deleteWeapon(strings.TrimSpace(args[i]))
 		}
 		return true
 	}
 	s.triggerCommands["gr.setgroup"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_groups", true) || len(args) != 2 { return true }
+		if !s.settings.GetBool("triggerhack_groups", true) || len(args) != 2 {
+			return true
+		}
 		p.setGroup(args[1])
 		return true
 	}
 	s.triggerCommands["gr.setlevelgroup"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_groups", true) || len(args) != 2 { return true }
+		if !s.settings.GetBool("triggerhack_groups", true) || len(args) != 2 {
+			return true
+		}
 		if level := p.server.GetLevel(p.levelName); level != nil {
 			for _, pid := range level.getPlayers() {
 				if pl := p.server.GetPlayer(pid); pl != nil {
@@ -499,14 +562,18 @@ func (s *Server) initTriggerCommands() {
 		return true
 	}
 	s.triggerCommands["gr.setplayergroup"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_groups", true) || len(args) != 3 { return true }
+		if !s.settings.GetBool("triggerhack_groups", true) || len(args) != 3 {
+			return true
+		}
 		if target := p.server.getPlayerByAccount(args[1], PLTYPE_ANYCLIENT); target != nil {
 			target.setGroup(args[2])
 		}
 		return true
 	}
 	s.triggerCommands["gr.rcchat"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_rc", false) { return true }
+		if !s.settings.GetBool("triggerhack_rc", false) {
+			return true
+		}
 		msg := strings.Join(args[1:], ",")
 		buf := NewBuffer()
 		buf.WriteByte(PLO_PRIVATEMESSAGE)
@@ -515,30 +582,42 @@ func (s *Server) initTriggerCommands() {
 		return true
 	}
 	s.triggerCommands["gr.addguildmember"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 3 { return true }
+		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 3 {
+			return true
+		}
 		guild, account, nick := args[1], args[2], ""
-		if len(args) > 3 { nick = args[3] }
+		if len(args) > 3 {
+			nick = args[3]
+		}
 		if guild != "" && account != "" {
 			guildPath := fmt.Sprintf("guilds/guild%s.txt", guild)
 			if data, err := s.config.LoadFile(guildPath); err == nil {
 				if !strings.Contains(string(data), account) {
 					line := account
-					if nick != "" { line += ":" + nick }
+					if nick != "" {
+						line += ":" + nick
+					}
 					s.config.SaveFile(guildPath, append(data, []byte("\n"+line)...))
 				}
-			} else { s.config.SaveFile(guildPath, []byte(account)) }
+			} else {
+				s.config.SaveFile(guildPath, []byte(account))
+			}
 		}
 		return true
 	}
 	s.triggerCommands["gr.removeguildmember"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 3 { return true }
+		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 3 {
+			return true
+		}
 		guild, account := args[1], args[2]
 		if guild != "" && account != "" {
 			guildPath := fmt.Sprintf("guilds/guild%s.txt", guild)
 			if data, err := s.config.LoadFile(guildPath); err == nil {
 				if idx := strings.Index(string(data), account); idx != -1 {
 					endIdx := strings.Index(string(data[idx:]), "\n")
-					if endIdx != -1 { endIdx += idx + 1 }
+					if endIdx != -1 {
+						endIdx += idx + 1
+					}
 					newData := append(data[:idx], data[endIdx+1:]...)
 					s.config.SaveFile(guildPath, newData)
 				}
@@ -547,7 +626,9 @@ func (s *Server) initTriggerCommands() {
 		return true
 	}
 	s.triggerCommands["gr.removeguild"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 2 { return true }
+		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 2 {
+			return true
+		}
 		guild := args[1]
 		if guild != "" {
 			guildPath := fmt.Sprintf("guilds/guild%s.txt", guild)
@@ -558,8 +639,8 @@ func (s *Server) initTriggerCommands() {
 					pl.setNickname(strings.Split(pl.character.nickName, "(")[0])
 					buf := NewBuffer()
 					buf.WriteByte(PLO_PLAYERPROPS)
-					buf.WriteByte(PLPROP_NICKNAME)
-					buf.WriteString8(pl.character.nickName)
+					buf.WriteGChar(PLPROP_NICKNAME)
+					buf.Write(pl.getProp(PLPROP_NICKNAME))
 					pl.SendPacket(buf.Bytes())
 				}
 			}
@@ -567,21 +648,27 @@ func (s *Server) initTriggerCommands() {
 		return true
 	}
 	s.triggerCommands["gr.setguild"] = func(p *Player, args []string) bool {
-		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 2 { return true }
+		if !s.settings.GetBool("triggerhack_guilds", false) || len(args) < 2 {
+			return true
+		}
 		guild := args[1]
 		account := ""
-		if len(args) > 2 { account = args[2] }
+		if len(args) > 2 {
+			account = args[2]
+		}
 		if guild != "" {
 			target := p
-			if account != "" { target = s.getPlayerByAccount(account, PLTYPE_ANYCLIENT) }
+			if account != "" {
+				target = s.getPlayerByAccount(account, PLTYPE_ANYCLIENT)
+			}
 			if target != nil {
 				target.guild = guild
 				baseNick := strings.Split(target.character.nickName, "(")[0]
 				target.setNickname(baseNick + " (" + guild + ")")
 				buf := NewBuffer()
 				buf.WriteByte(PLO_PLAYERPROPS)
-				buf.WriteByte(PLPROP_NICKNAME)
-				buf.WriteString8(target.character.nickName)
+				buf.WriteGChar(PLPROP_NICKNAME)
+				buf.Write(target.getProp(PLPROP_NICKNAME))
 				target.SendPacket(buf.Bytes())
 			}
 		}
@@ -613,7 +700,6 @@ func (s *Server) sendPacketToAll(data []byte, excludeId uint16) {
 		}
 	}
 }
-
 
 func (s *Server) AddNPC(npc *NPC) bool {
 	s.npcMu.Lock()
@@ -724,7 +810,7 @@ type Account struct {
 	accountName, communityName, email, adminIp, banReason, banLength, accountComments, levelName string
 	accountIpStr                                                                                 string
 	accountIp                                                                                    uint
-	isBanned, isGuest, isExternal, isLoadOnly, isStaff, loadedFromDefault                       bool
+	isBanned, isGuest, isExternal, isLoadOnly, isStaff, loadedFromDefault                        bool
 	adminRights                                                                                  int
 	deviceId                                                                                     int64
 	character                                                                                    Character
@@ -1034,7 +1120,9 @@ type Player struct {
 	recvBuffer                                                                []byte
 	encryptionKey                                                             byte
 	encryption                                                                Encryption
-	outEncryption                                                              Encryption
+	outEncryption                                                             Encryption
+	queueOutgoing                                                             bool
+	outQueue                                                                  []byte
 	version, os, serverName                                                   string
 	id                                                                        uint16
 	envCodePage                                                               int
@@ -1103,13 +1191,21 @@ func (p *Player) OnRecv() bool {
 	buf := make([]byte, 4096)
 	n, err := p.conn.Read(buf)
 	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() { return true }
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return true
+		}
+		p.server.logger.Debug("OnRecv: read error from %s before loggedIn=%v: %v", p.conn.RemoteAddr(), p.isLoggedIn(), err)
 		p.disconnect()
 		return false
 	}
-	if n > 0 { p.server.logger.Debug("OnRecv: received %d bytes, buffer now %d bytes", n, len(p.recvBuffer)+n) }
+	if n > 0 {
+		p.lastData = time.Now()
+		p.server.logger.Debug("OnRecv: received %d bytes, buffer now %d bytes", n, len(p.recvBuffer)+n)
+	}
 	p.recvBuffer = append(p.recvBuffer, buf[:n]...)
-	if len(p.recvBuffer) > 0 { p.server.logger.Debug("OnRecv: buffer[0]=%02X buffer[1]=%02X", p.recvBuffer[0], p.recvBuffer[1]) }
+	if len(p.recvBuffer) > 0 {
+		p.server.logger.Debug("OnRecv: buffer[0]=%02X buffer[1]=%02X", p.recvBuffer[0], p.recvBuffer[1])
+	}
 	p.processPackets()
 	return true
 }
@@ -1126,7 +1222,11 @@ func (p *Player) processPackets() {
 		p.recvBuffer = p.recvBuffer[length+2:]
 		if p.playerType == PLTYPE_AWAIT {
 			p.server.logger.Debug("Login packet: %d bytes", len(packet))
-			if !p.handleLogin(packet) { p.server.logger.Error("handleLogin returned false"); p.disconnect(); return }
+			if !p.handleLogin(packet) {
+				p.server.logger.Error("handleLogin returned false")
+				p.disconnect()
+				return
+			}
 			p.server.AddPlayer(p, p.id)
 			p.server.logger.Info("Sending PLO_STAFFGUILDS...")
 			staffGuilds := p.server.settings.Get("staffguilds")
@@ -1137,7 +1237,7 @@ func (p *Player) processPackets() {
 				for _, guild := range guilds {
 					guild = strings.TrimSpace(guild)
 					if guild != "" {
-						buf.WriteString("\"" + guild + "\",")
+						buf.Write([]byte("\"" + guild + "\","))
 					}
 				}
 				if buf.Len() > 1 {
@@ -1156,7 +1256,7 @@ func (p *Player) processPackets() {
 				for _, status := range statuses {
 					status = strings.TrimSpace(status)
 					if status != "" {
-						buf.WriteString(status + ",")
+						buf.Write([]byte(status + ","))
 					}
 				}
 				if buf.Len() > 1 {
@@ -1169,16 +1269,30 @@ func (p *Player) processPackets() {
 			p.server.logger.Info("Exchanging player props with existing players...")
 			p.server.playerMu.RLock()
 			for _, other := range p.server.players {
-				if other == nil { continue }
-				if other.id == p.id { continue }
-				if other.playerType&PLTYPE_NC != 0 { continue }
-				if other.conn == nil { continue }
-				if !other.isLoggedIn() { continue }
+				if other == nil {
+					continue
+				}
+				if other.id == p.id {
+					continue
+				}
+				if other.playerType&PLTYPE_NC != 0 {
+					continue
+				}
+				if other.conn == nil {
+					continue
+				}
+				if !other.isLoggedIn() {
+					continue
+				}
 				myProps := p.sendPropsWithArray(getLoginProps)
-				if len(myProps) == 0 { continue }
+				if len(myProps) == 0 {
+					continue
+				}
 				other.sendPacket(append([]byte{PLO_PLAYERPROPS}, myProps...))
 				otherProps := other.sendPropsWithArray(getLoginProps)
-				if len(otherProps) == 0 { continue }
+				if len(otherProps) == 0 {
+					continue
+				}
 				p.sendPacket(append([]byte{PLO_PLAYERPROPS}, otherProps...))
 			}
 			p.server.playerMu.RUnlock()
@@ -1192,7 +1306,8 @@ func (p *Player) handlePacket(packet []byte) bool {
 	if len(packet) == 0 {
 		return true
 	}
-	packetId := int(packet[0])
+	packetId := int(NewBufferFromBytes(packet).ReadGChar())
+	packet = append([]byte{byte(packetId)}, packet[1:]...)
 	p.packetCount++
 	packetName := pliNames[byte(packetId)]
 	if packetName == "" {
@@ -1460,7 +1575,9 @@ func (p *Player) handleLogin(packet []byte) bool {
 		return false
 	}
 	p.server.logger.Debug("handleLogin: decompressed to %d bytes", len(decompressed))
-	if len(decompressed) < 10 { return false }
+	if len(decompressed) < 10 {
+		return false
+	}
 	p.server.logger.Debug("handleLogin: raw bytes = %q", string(decompressed))
 	p.server.logger.Debug("handleLogin: raw hex = % X", decompressed)
 	// C++ format: [GChar client type][version: 8 bytes][account data...]
@@ -1473,28 +1590,44 @@ func (p *Player) handleLogin(packet []byte) bool {
 	var encryptionKey byte
 	if clientType&PLTYPE_ANYCLIENT != 0 && clientType != PLTYPE_CLIENT {
 		p.server.logger.Debug("handleLogin: Reading encryption key for GEN_4+ client")
-		if buf.Remaining() < 1 { return false }
-		encryptionKey = buf.ReadGChar()  // ReadGChar decodes G-encoded value
+		if buf.Remaining() < 1 {
+			return false
+		}
+		encryptionKey = buf.ReadGChar() // ReadGChar decodes G-encoded value
 		p.server.logger.Debug("handleLogin: encryptionKey=%d", encryptionKey)
 	}
 	// Check client type - all clients send 8-char version after client type byte
-	if buf.Remaining() < 8 { return false }
+	if buf.Remaining() < 8 {
+		return false
+	}
 	version := string(buf.data[buf.read : buf.read+8])
 	buf.read += 8
 	p.server.logger.Debug("handleLogin: version=%q", version)
 	// Read account (GChar length + string)
-	if buf.Remaining() < 1 { return false }
+	if buf.Remaining() < 1 {
+		return false
+	}
 	accountLen := buf.ReadGChar()
-	if buf.Remaining() < int(accountLen) { return false }
+	if buf.Remaining() < int(accountLen) {
+		return false
+	}
 	accountBytes := make([]byte, accountLen)
-	for i := 0; i < int(accountLen); i++ { accountBytes[i] = buf.ReadByte() }
+	for i := 0; i < int(accountLen); i++ {
+		accountBytes[i] = buf.ReadByte()
+	}
 	account := string(accountBytes)
 	// Read password (GChar length + string)
-	if buf.Remaining() < 1 { return false }
+	if buf.Remaining() < 1 {
+		return false
+	}
 	passwordLen := buf.ReadGChar()
-	if buf.Remaining() < int(passwordLen) { return false }
+	if buf.Remaining() < int(passwordLen) {
+		return false
+	}
 	passwordBytes := make([]byte, passwordLen)
-	for i := 0; i < int(passwordLen); i++ { passwordBytes[i] = buf.ReadByte() }
+	for i := 0; i < int(passwordLen); i++ {
+		passwordBytes[i] = buf.ReadByte()
+	}
 	password := string(passwordBytes)
 	// Read client identity (raw string until newline)
 	identity := buf.ReadString()
@@ -1537,7 +1670,9 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.statusMsg = ""
 	p.os = "wind"
 	p.envCodePage = 1252
-	for i := range p.gAttribs { p.gAttribs[i] = "" }
+	for i := range p.gAttribs {
+		p.gAttribs[i] = ""
+	}
 	p.flagList = make(map[string]string)
 	p.weaponList = []string{}
 	p.chestList = []string{}
@@ -1569,6 +1704,8 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.server.logger.Debug("Initialized outEncryption gen=%d key=%d iterator=%08X", p.outEncryption.gen, encryptionKey, p.outEncryption.iterator)
 	}
 	p.server.logger.Info("Setting encryption gen to %d (ENCRYPT_GEN_3=%d) for client type %d", p.encryption.gen, ENCRYPT_GEN_3, clientType)
+	p.queueOutgoing = true
+	p.outQueue = p.outQueue[:0]
 	sigBuf := NewBuffer()
 	sigBuf.WriteByte(PLO_SIGNATURE).WriteByte(73)
 	p.send(sigBuf)
@@ -1579,7 +1716,9 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.send(ghostBuf)
 	}
 	if clientType&PLTYPE_ANYCLIENT != 0 {
-		p.sendPLO_HASNPCSERVER(p.server.settings.GetBool("serverside", false))
+		if p.server.settings.GetBool("serverside", false) {
+			p.sendPLO_HASNPCSERVER()
+		}
 		unkBuf := NewBuffer()
 		unkBuf.WriteByte(PLO_UNKNOWN168)
 		p.send(unkBuf)
@@ -1601,12 +1740,12 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.sendPLO_FLAGSET("body", p.character.bodyImage)
 	p.sendPLO_FLAGSET("sword", p.character.swordImage)
 	p.sendPLO_FLAGSET("shield", p.character.shieldImage)
-	p.sendPLO_FLAGSET("color1", string(p.character.colors[0]))
-	p.sendPLO_FLAGSET("color2", string(p.character.colors[1]))
-	p.sendPLO_FLAGSET("color3", string(p.character.colors[2]))
-	p.sendPLO_FLAGSET("color4", string(p.character.colors[3]))
-	p.sendPLO_FLAGSET("color5", string(p.character.colors[4]))
-	p.sendPLO_FLAGSET("sprite", string(p.character.sprite))
+	p.sendPLO_FLAGSET("color1", fmt.Sprintf("%d", p.character.colors[0]))
+	p.sendPLO_FLAGSET("color2", fmt.Sprintf("%d", p.character.colors[1]))
+	p.sendPLO_FLAGSET("color3", fmt.Sprintf("%d", p.character.colors[2]))
+	p.sendPLO_FLAGSET("color4", fmt.Sprintf("%d", p.character.colors[3]))
+	p.sendPLO_FLAGSET("color5", fmt.Sprintf("%d", p.character.colors[4]))
+	p.sendPLO_FLAGSET("sprite", fmt.Sprintf("%d", p.character.sprite))
 	p.server.logger.Info("Sending server flags...")
 	for flag, value := range p.server.flags {
 		p.sendPLO_FLAGSET(flag, value)
@@ -1635,9 +1774,13 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.warp(startLevel, 32, 32)
 	p.server.logger.Info("Sending weapons...")
 	for _, weaponName := range p.weaponList {
-		if strings.HasPrefix(weaponName, "-") { continue }
+		if strings.HasPrefix(weaponName, "-") {
+			continue
+		}
 		weapon := p.server.weapons[weaponName]
-		if weapon == nil { continue }
+		if weapon == nil {
+			continue
+		}
 		p.server.logger.Debug("Sending weapon: %s", weaponName)
 		p.sendWeapon(weapon, 1000+uint32(len(weaponName)))
 	}
@@ -1652,32 +1795,39 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.sendPLO_MINIMAP()
 	}
 	p.server.logger.Info("Sending PLO_RPGWINDOW...")
-	p.sendPLO_RPGWINDOW("Welcome to " + p.server.name)
+	p.sendPLO_RPGWINDOW(fmt.Sprintf("\"Welcome to %s.\",\"Go Code GServer.\"", p.server.name))
 	p.server.logger.Info("Sending PLO_STARTMESSAGE...")
-	p.sendPLO_STARTMESSAGE("Welcome to " + p.server.name)
+	p.sendPLO_STARTMESSAGE(p.server.serverMessage)
 	p.server.logger.Info("Sending PLO_SERVERTEXT (no message)...")
 	buf = NewBuffer()
 	buf.WriteByte(PLO_SERVERTEXT)
 	p.send(buf)
-	p.sendPLO_LISTPROCESSES()
 	p.sendCompress(true)
+	p.sendPLO_LISTPROCESSES()
 	p.server.logger.Info("[%s] Player logged in (type=%d)", account, clientType)
 	return true
 }
 
 func (p *Player) handleRawData(data []byte) {
-	if len(data) == 0 { return }
+	if len(data) == 0 {
+		return
+	}
 	p.server.logger.Debug("handleRawData: RAW data: % X (gen=%d)", data, p.encryption.gen)
 	var decompressed []byte
 	var err error
 	if p.encryption.gen == ENCRYPT_GEN_4 {
 		p.server.logger.Debug("handleRawData: GEN_4 - decrypting and decompressing with BZ2")
-		p.encryption.limit = 4  // COMPRESS_BZ2 limit
+		p.encryption.limit = 4 // COMPRESS_BZ2 limit
 		p.encryption.Decrypt(data)
 		decompressed, err = Bz2Decompress(data)
-		if err != nil { p.server.logger.Debug("handleRawData: BZ2 decompress failed: %v", err); return }
+		if err != nil {
+			p.server.logger.Debug("handleRawData: BZ2 decompress failed: %v", err)
+			return
+		}
 	} else if p.encryption.gen >= ENCRYPT_GEN_5 {
-		if len(data) < 1 { return }
+		if len(data) < 1 {
+			return
+		}
 		compressType := data[0]
 		encryptedData := data[1:]
 		p.server.logger.Debug("handleRawData: GEN_5+ - compressType=%d, encrypted data: % X", compressType, encryptedData)
@@ -1691,10 +1841,16 @@ func (p *Player) handleRawData(data []byte) {
 		p.server.logger.Debug("handleRawData: AFTER decrypt - iterator=%08X data: % X", p.encryption.iterator, encryptedData)
 		if compressType == COMPRESS_ZLIB {
 			decompressed, err = ZlibDecompress(encryptedData)
-			if err != nil { p.server.logger.Debug("handleRawData: ZLIB decompress failed: %v", err); return }
+			if err != nil {
+				p.server.logger.Debug("handleRawData: ZLIB decompress failed: %v", err)
+				return
+			}
 		} else if compressType == COMPRESS_BZ2 {
 			decompressed, err = Bz2Decompress(encryptedData)
-			if err != nil { p.server.logger.Debug("handleRawData: BZ2 decompress failed: %v", err); return }
+			if err != nil {
+				p.server.logger.Debug("handleRawData: BZ2 decompress failed: %v", err)
+				return
+			}
 		} else if compressType == COMPRESS_UNCOMPRESSED {
 			decompressed = encryptedData
 		} else {
@@ -1703,30 +1859,52 @@ func (p *Player) handleRawData(data []byte) {
 		}
 	} else {
 		p.server.logger.Debug("handleRawData: GEN_1-3 - using newline delimiter")
-		for len(data) > 0 {
-			newline := bytes.IndexByte(data, '\n')
-			if newline == -1 { break }
-			packet := data[:newline]
-			data = data[newline+1:]
-			if len(packet) > 0 { p.handlePacket(packet) }
-		}
+		p.handleDecompressedPackets(data)
 		return
 	}
 	p.server.logger.Debug("handleRawData: DECOMPRESSED data: % X", decompressed)
-	if len(decompressed) > 0 { p.handlePacket(decompressed) }
+	p.handleDecompressedPackets(decompressed)
 }
-func (p *Player) sendPacket(packet []byte) {
-	if len(packet) == 0 { return }
-	var data []byte
-	packetId := byte(0)
-	if len(packet) > 0 {
-		packetId = packet[0]
+
+func (p *Player) handleDecompressedPackets(data []byte) {
+	for len(data) > 0 {
+		newline := bytes.IndexByte(data, '\n')
+		if newline == -1 {
+			if len(data) > 0 {
+				p.handlePacket(data)
+			}
+			return
+		}
+		packet := data[:newline]
+		data = data[newline+1:]
+		if len(packet) > 0 {
+			p.handlePacket(packet)
+		}
 	}
+}
+
+func (p *Player) sendPacket(packet []byte) {
+	if len(packet) == 0 {
+		return
+	}
+	rawPacketId := packet[0]
+	packet = encodeOutgoingPacket(packet)
+	packetId := rawPacketId
 	packetName := ploNames[packetId]
 	if packetName == "" {
 		packetName = "UNKNOWN"
 	}
 	p.server.logger.Debug("sendPacket: RAW %s (ID %d): % X", packetName, packetId, packet)
+	if p.queueOutgoing {
+		p.server.logger.Debug("sendPacket: queued %s (ID %d), %d bytes", packetName, packetId, len(packet))
+		p.outQueue = append(p.outQueue, packet...)
+		return
+	}
+	p.writeEncodedPacket(packetName, packetId, packet)
+}
+
+func (p *Player) writeEncodedPacket(packetName string, packetId byte, packet []byte) {
+	var data []byte
 	switch p.encryption.gen {
 	case ENCRYPT_GEN_1:
 		p.server.logger.Debug("sendPacket: GEN_1, sending %s (ID %d), raw %d bytes", packetName, packetId, len(packet))
@@ -1751,7 +1929,14 @@ func (p *Player) sendPacket(packet []byte) {
 		var compressionType uint8 = COMPRESS_UNCOMPRESSED
 		var compressed []byte
 		var err error
-		if len(packet) > 55 {
+		if len(packet) > 0x2000 {
+			compressionType = COMPRESS_BZ2
+			compressed, err = Bz2Compress(packet)
+			if err != nil {
+				p.server.logger.Error("sendPacket: BZ2 compression failed: %v", err)
+				return
+			}
+		} else if len(packet) > 55 {
 			compressionType = COMPRESS_ZLIB
 			compressed, err = ZlibCompress(packet)
 			if err != nil {
@@ -1762,7 +1947,7 @@ func (p *Player) sendPacket(packet []byte) {
 			compressed = packet
 		}
 		// Set encryption limit based on compression type
-		limits := map[uint8]int32{COMPRESS_UNCOMPRESSED: 12, COMPRESS_ZLIB: 4}
+		limits := map[uint8]int32{COMPRESS_UNCOMPRESSED: 12, COMPRESS_ZLIB: 4, COMPRESS_BZ2: 4}
 		if limit, ok := limits[compressionType]; ok {
 			p.outEncryption.limit = limit
 		}
@@ -1771,14 +1956,14 @@ func (p *Player) sendPacket(packet []byte) {
 		encrypted := p.outEncryption.Encrypt(compressed)
 		p.server.logger.Debug("sendPacket: AFTER encrypt - outIterator=%08X", p.outEncryption.iterator)
 		// Build packet: [length_lo][length_hi][compression_type][encrypted...]
-		totalLen := 2 + 1 + len(encrypted)
-		if totalLen > 0xFFFE {
-			p.server.logger.Error("sendPacket: GEN_5 packet too large (%s ID %d, %d bytes)", packetName, packetId, totalLen)
+		frameLen := 1 + len(encrypted)
+		if frameLen > 0xFFFC {
+			p.server.logger.Error("sendPacket: GEN_5 packet too large (%s ID %d, %d bytes)", packetName, packetId, frameLen)
 			return
 		}
-		data = make([]byte, totalLen)
-		data[0] = byte(totalLen)
-		data[1] = byte(totalLen >> 8)
+		data = make([]byte, 2+frameLen)
+		data[0] = byte(frameLen)
+		data[1] = byte(frameLen >> 8)
 		data[2] = compressionType
 		copy(data[3:], encrypted)
 		p.server.logger.Debug("sendPacket: GEN_5, sending %s (ID %d), original %d bytes, compressed %d bytes, compression_type=%d", packetName, packetId, len(packet), len(compressed), compressionType)
@@ -1790,8 +1975,27 @@ func (p *Player) sendPacket(packet []byte) {
 	p.conn.Write(data)
 }
 
+func encodeOutgoingPacket(packet []byte) []byte {
+	encoded := append([]byte(nil), packet...)
+	if encoded[0] > 223 {
+		encoded[0] = 223
+	}
+	encoded[0] += 32
+	return encoded
+}
+
 func (p *Player) sendCompress(forceSend bool) {
-	// Packets sent immediately now, queue not needed
+	if !p.queueOutgoing {
+		return
+	}
+	p.queueOutgoing = false
+	if len(p.outQueue) == 0 {
+		return
+	}
+	queued := append([]byte(nil), p.outQueue...)
+	p.outQueue = p.outQueue[:0]
+	p.server.logger.Debug("sendCompress: flushing queued login stream, %d bytes", len(queued))
+	p.writeEncodedPacket("QUEUED", 0, queued)
 }
 
 func (p *Player) send(buf *Buffer) {
@@ -1806,7 +2010,7 @@ func (p *Player) disconnect() {
 		p.server.DeletePlayer(p)
 	}
 }
-func (p *Player) hasRight(perm int) bool    { return p.adminRights&perm != 0 }
+func (p *Player) hasRight(perm int) bool { return p.adminRights&perm != 0 }
 func (p *Player) sendPLO_LEVELBOARD(levelName string, boardData []byte) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_LEVELBOARD).WriteGString(levelName).Write(boardData)
@@ -1844,13 +2048,11 @@ func (p *Player) sendPLO_SIGN(sign *LevelSign) bool {
 func (p *Player) sendPLO_OTHERPLPROPS(other *Player) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_OTHERPLPROPS).WriteGShort(other.id)
-	buf.WriteGString(other.character.nickName).WriteGString(other.character.gani)
-	buf.WriteGString(other.character.bodyImage).WriteGString(other.character.headImage)
-	buf.WriteGString(other.character.swordImage).WriteGString(other.character.shieldImage)
-	buf.WriteGString(other.character.horseImage).WriteGByte(other.character.sprite)
-	for i := 0; i < 5; i++ { buf.WriteGByte(other.character.colors[i]) }
-	buf.WriteGInt(uint32(other.x)).WriteGInt(uint32(other.y)).WriteGInt(uint32(other.z))
-	buf.WriteGString(other.levelName)
+	propIds := []int{PLPROP_NICKNAME, PLPROP_GANI, PLPROP_BODYIMG, PLPROP_HEADGIF, PLPROP_SWORDPOWER, PLPROP_SHIELDPOWER, PLPROP_HORSEGIF, PLPROP_SPRITE, PLPROP_COLORS, PLPROP_X, PLPROP_Y, PLPROP_Z, PLPROP_CURLEVEL}
+	for _, propId := range propIds {
+		buf.WriteGChar(byte(propId))
+		buf.Write(other.getProp(propId))
+	}
 	p.send(buf)
 	return true
 }
@@ -1872,10 +2074,14 @@ func (p *Player) parseProps(props []byte) {
 		propType := buf.ReadByte()
 		value := buf.ReadGString()
 		switch propType {
-		case PLPROP_ACCOUNTNAME: p.accountName = value
-		case PLPROP_NICKNAME: p.character.nickName = value
-		case PLPROP_X: p.x = int16(atoi(value))
-		case PLPROP_Y: p.y = int16(atoi(value))
+		case PLPROP_ACCOUNTNAME:
+			p.accountName = value
+		case PLPROP_NICKNAME:
+			p.character.nickName = value
+		case PLPROP_X:
+			p.x = int16(atoi(value))
+		case PLPROP_Y:
+			p.y = int16(atoi(value))
 		}
 	}
 }
@@ -1886,16 +2092,21 @@ func (p *Player) sendPLO_PLAYERPROPS() bool {
 }
 func (p *Player) sendPLO_PLAYERWARP(x, y, z int16, levelName string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_PLAYERWARP).WriteGShort(p.id)
-	buf.WriteGInt(uint32(x)).WriteGInt(uint32(y)).WriteGInt(uint32(z))
-	buf.WriteGString(levelName)
+	buf.WriteByte(PLO_PLAYERWARP)
+	buf.WriteGChar(byte(x * 2))
+	buf.WriteGChar(byte(y * 2))
+	buf.Write([]byte(levelName))
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPTO_ALL_CHAT(message string) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_TOALL).WriteGString(p.character.nickName).WriteGString(message)
-	for _, pl := range p.server.players { if pl.isLoggedIn() && pl.levelName == p.levelName && pl.conn != nil { pl.send(buf) } }
+	for _, pl := range p.server.players {
+		if pl.isLoggedIn() && pl.levelName == p.levelName && pl.conn != nil {
+			pl.send(buf)
+		}
+	}
 	return true
 }
 func (p *Player) sendPLO_PRIVATEMESSAGE(from, message string) bool {
@@ -1906,19 +2117,19 @@ func (p *Player) sendPLO_PRIVATEMESSAGE(from, message string) bool {
 }
 func (p *Player) sendPLO_DISCMESSAGE(message string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_DISCMESSAGE).WriteGString(message)
+	buf.WriteByte(PLO_DISCMESSAGE).Write([]byte(message))
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPLO_WARPFAILED(message string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_WARPFAILED).WriteGString(message)
+	buf.WriteByte(PLO_WARPFAILED).Write([]byte(message))
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPLO_LEVELNAME(levelName string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_LEVELNAME).WriteGString(levelName)
+	buf.WriteByte(PLO_LEVELNAME).Write([]byte(levelName))
 	p.send(buf)
 	return true
 }
@@ -1969,7 +2180,9 @@ func (p *Player) sendPLO_NPCMOVED(npcId uint32, x, y int16) bool {
 func (p *Player) sendPLO_NPCACTION(npcId uint32, action string, params ...string) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCACTION).WriteGInt(npcId).WriteGString(action)
-	for _, param := range params { buf.WriteGString(param) }
+	for _, param := range params {
+		buf.WriteGString(param)
+	}
 	p.send(buf)
 	return true
 }
@@ -2017,13 +2230,16 @@ func (p *Player) sendPLO_ITEMDEL(itemIdx int) bool {
 }
 func (p *Player) sendPLO_FLAGSET(flag, value string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_FLAGSET).WriteGString(flag).WriteGString(value)
+	buf.WriteByte(PLO_FLAGSET).Write([]byte(flag))
+	if value != "" {
+		buf.WriteByte('=').Write([]byte(value))
+	}
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPLO_FLAGDEL(flag string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_FLAGDEL).WriteGString(flag)
+	buf.WriteByte(PLO_FLAGDEL).Write([]byte(flag))
 	p.send(buf)
 	return true
 }
@@ -2048,17 +2264,16 @@ func (p *Player) sendPLO_EXPLOSION(x, y int16, power int) bool {
 func (p *Player) sendPLO_ADDPLAYER(other *Player) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_ADDPLAYER).WriteGShort(other.id)
-	// Account name with GChar length prefix
-	buf.WriteGString(other.accountName)
-	// Props embedded in ADDPLAYER for RC
+	buf.WriteGChar(byte(len(other.accountName)))
+	buf.Write([]byte(other.accountName))
 	levelName := other.levelName
 	if levelName == "" {
 		levelName = " "
 	}
-	buf.WriteGChar(PLPROP_CURLEVEL).WriteGString(levelName)
-	buf.WriteGChar(PLPROP_PSTATUSMSG).WriteGString(other.statusMsg)
-	buf.WriteGChar(PLPROP_NICKNAME).WriteGString(other.character.nickName)
-	buf.WriteGChar(PLPROP_COMMUNITYNAME).WriteGString(other.communityName)
+	buf.WriteGChar(PLPROP_CURLEVEL).WriteGChar(byte(len(levelName))).Write([]byte(levelName))
+	buf.WriteGChar(PLPROP_PSTATUSMSG).Write(other.getProp(PLPROP_PSTATUSMSG))
+	buf.WriteGChar(PLPROP_NICKNAME).Write(other.getProp(PLPROP_NICKNAME))
+	buf.WriteGChar(PLPROP_COMMUNITYNAME).Write(other.getProp(PLPROP_COMMUNITYNAME))
 	p.send(buf)
 	return true
 }
@@ -2070,13 +2285,13 @@ func (p *Player) sendPLO_DELPLAYER(id uint16) bool {
 }
 func (p *Player) sendPLO_STARTMESSAGE(message string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_STARTMESSAGE).WriteGString(message)
+	buf.WriteByte(PLO_STARTMESSAGE).Write([]byte(message))
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPLO_SERVERTEXT(message string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_SERVERTEXT).WriteGString(message)
+	buf.WriteByte(PLO_SERVERTEXT).Write([]byte(message))
 	p.send(buf)
 	return true
 }
@@ -2089,7 +2304,9 @@ func (p *Player) sendPLO_SHOOT(x, y int16, angle float32, owner string) bool {
 func (p *Player) sendPBoardPacket(x, y, width, height int16, tiles []int16) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_BOARDPACKET).WriteShort(x).WriteShort(y).WriteShort(width).WriteShort(height)
-	for _, tile := range tiles { buf.WriteShort(tile) }
+	for _, tile := range tiles {
+		buf.WriteShort(tile)
+	}
 	p.send(buf)
 	return true
 }
@@ -2102,14 +2319,18 @@ func (p *Player) sendPLO_TOALL(message string) bool {
 func (p *Player) sendPLO_BOARDMODIFY(x, y, width, height int16, tiles []int16) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_BOARDMODIFY).WriteShort(x).WriteShort(y).WriteShort(width).WriteShort(height)
-	for _, tile := range tiles { buf.WriteShort(tile) }
+	for _, tile := range tiles {
+		buf.WriteShort(tile)
+	}
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPLO_BADDYPROPS(id uint32, x, y int16, image string, props []string) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_BADDYPROPS).WriteGInt(id).WriteGString(image)
-	for _, prop := range props { buf.WriteGString(prop) }
+	for _, prop := range props {
+		buf.WriteGString(prop)
+	}
 	p.send(buf)
 	return true
 }
@@ -2151,13 +2372,15 @@ func (p *Player) sendPLO_NPCWEAPONADD(weaponId uint32, image string, owner strin
 }
 func (p *Player) sendPLO_NPCWEAPONDEL(weaponName string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_NPCWEAPONDEL).WriteString(weaponName)
+	buf.WriteByte(PLO_NPCWEAPONDEL).Write([]byte(weaponName))
 	p.send(buf)
 	return true
 }
 
 func (p *Player) sendWeapon(weapon *Weapon, weaponId uint32) bool {
-	if weapon == nil { return false }
+	if weapon == nil {
+		return false
+	}
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCWEAPONADD).WriteGInt(weaponId).WriteGString(weapon.image).WriteGString("")
 	p.send(buf)
@@ -2187,13 +2410,24 @@ func (p *Player) sendPLO_PUSHAWAY(idx uint16, x, y float32) bool {
 }
 func (p *Player) sendPLO_LEVELMODTIME(modTime int64) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_LEVELMODTIME).WriteInt(int32(modTime))
+	buf.WriteByte(PLO_LEVELMODTIME).WriteGInt5(uint64(modTime))
 	p.send(buf)
 	return true
 }
 func (p *Player) sendPLO_NEWWORLDTIME(worldTime uint) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_NEWWORLDTIME).WriteGInt(uint32(worldTime))
+	buf.WriteByte(PLO_NEWWORLDTIME).WriteGInt4(uint32(worldTime))
+	p.send(buf)
+	return true
+}
+func (p *Player) sendPLO_GHOSTICON(enabled bool) bool {
+	buf := NewBuffer()
+	buf.WriteByte(PLO_GHOSTICON)
+	if enabled {
+		buf.WriteByte(1)
+	} else {
+		buf.WriteByte(0)
+	}
 	p.send(buf)
 	return true
 }
@@ -2203,9 +2437,9 @@ func (p *Player) sendPLO_DEFAULTWEAPON(weaponName string) bool {
 	p.send(buf)
 	return true
 }
-func (p *Player) sendPLO_HASNPCSERVER(has bool) bool {
+func (p *Player) sendPLO_HASNPCSERVER() bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_HASNPCSERVER).WriteGByte(byte(map[bool]int{false: 0, true: 1}[has]))
+	buf.WriteByte(PLO_HASNPCSERVER)
 	p.send(buf)
 	return true
 }
@@ -2224,7 +2458,9 @@ func (p *Player) sendPLO_FILESENDFAILED(filename string) bool {
 func (p *Player) sendPLO_HITOBJECTS(objects []string) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_HITOBJECTS).WriteGInt(uint32(len(objects)))
-	for _, obj := range objects { buf.WriteGString(obj) }
+	for _, obj := range objects {
+		buf.WriteGString(obj)
+	}
 	p.send(buf)
 	return true
 }
@@ -2266,10 +2502,11 @@ func (p *Player) sendPLO_LISTPROCESSES() bool {
 }
 func (p *Player) sendPLO_RPGWINDOW(message string) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_RPGWINDOW).WriteGString(message)
+	buf.WriteByte(PLO_RPGWINDOW).Write([]byte(message))
 	p.send(buf)
 	return true
 }
+
 func (p *Player) warp(levelName string, x float64, y float64) {
 	cleanLevelName := strings.TrimSuffix(levelName, ".nw")
 	cleanLevelName = strings.TrimSuffix(cleanLevelName, ".zelda")
@@ -2308,13 +2545,15 @@ func (p *Player) warp(levelName string, x float64, y float64) {
 	p.setY(float32(y))
 	p.levelName = levelName
 	level.addPlayer(p)
+	p.sendPLO_PLAYERWARP(p.x, p.y, p.z, levelName)
 	p.sendPLO_LEVELNAME(levelName)
 	boardData := level.getBoardPacket()
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RAWDATA)
-	buf.WriteInt(int32(len(boardData)))
+	buf.WriteGInt(uint32(len(boardData)))
+	buf.WriteByte('\n')
 	buf.Write(boardData)
-	p.send(buf)
+	p.sendPacket(buf.Bytes())
 	p.sendPLO_LEVELMODTIME(level.modTime.Unix())
 	for _, link := range level.links {
 		p.sendPLO_LEVELLINK_FULL(link)
@@ -2322,8 +2561,9 @@ func (p *Player) warp(levelName string, x float64, y float64) {
 	for _, sign := range level.signs {
 		p.sendPLO_SIGN(sign)
 	}
-	p.sendPLO_NEWWORLDTIME(p.server.serverTime)
+	p.sendPLO_GHOSTICON(false)
 	p.sendPLO_ISLEADER()
+	p.sendPLO_NEWWORLDTIME(p.server.serverTime)
 	p.loaded = true
 	p.server.logger.Debug("warp: Player %s warped to %s at (%.0f, %.0f)", p.accountName, levelName, x, y)
 }
@@ -2333,20 +2573,24 @@ func (p *Player) processTimeout() {
 	}
 }
 
-func (p *Player) getId() uint16          { return p.id }
-func (p *Player) setId(id uint16)        { p.id = id }
-func (p *Player) setX(v float32)         { p.Account.x = int16(v * 2) }
-func (p *Player) setY(v float32)         { p.Account.y = int16(v * 2) }
-func (p *Player) setSprite(v string)     { p.character.bodyImage = v }
-func (p *Player) setNickname(v string)   { p.character.nickName = v }
+func (p *Player) getId() uint16           { return p.id }
+func (p *Player) setId(id uint16)         { p.id = id }
+func (p *Player) setX(v float32)          { p.Account.x = int16(v * 2) }
+func (p *Player) setY(v float32)          { p.Account.y = int16(v * 2) }
+func (p *Player) setSprite(v string)      { p.character.bodyImage = v }
+func (p *Player) setNickname(v string)    { p.character.nickName = v }
 func (p *Player) setAccountName(v string) { p.accountName = v }
-func (p *Player) getAccountName() string { return p.accountName }
-func (p *Player) getType() int           { return p.playerType }
-func (p *Player) isLoggedIn() bool       { return p.playerType != PLTYPE_AWAIT && p.id > 0 }
+func (p *Player) getAccountName() string  { return p.accountName }
+func (p *Player) getType() int            { return p.playerType }
+func (p *Player) isLoggedIn() bool        { return p.playerType != PLTYPE_AWAIT && p.id > 0 }
 func (p *Player) addWeapon(weaponName string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, w := range p.weaponList { if w == weaponName { return } }
+	for _, w := range p.weaponList {
+		if w == weaponName {
+			return
+		}
+	}
 	p.weaponList = append(p.weaponList, weaponName)
 }
 func (p *Player) deleteWeapon(weaponName string) {
@@ -2378,16 +2622,26 @@ func (p *Player) msgPLI_BOARDMODIFY(packet []byte) bool {
 	height := buf.ReadGShort()
 	tileCount := width * height
 	tiles := make([]int16, tileCount)
-	for i := 0; i < int(tileCount); i++ { tiles[i] = buf.ReadShort() }
+	for i := 0; i < int(tileCount); i++ {
+		tiles[i] = buf.ReadShort()
+	}
 	if level, ok := p.server.levels[p.levelName]; ok {
 		change := LevelBoardChange{x: int(x), y: int(y), width: int(width), height: int(height), newTiles: shortsToBytes(tiles), time: time.Now()}
 		level.boardChanges = append(level.boardChanges, change)
-		for _, plId := range level.players { if pl, ok := p.server.players[plId]; ok && pl.conn != nil { pl.sendPBoardPacket(int16(x), int16(y), int16(width), int16(height), tiles) } }
+		for _, plId := range level.players {
+			if pl, ok := p.server.players[plId]; ok && pl.conn != nil {
+				pl.sendPBoardPacket(int16(x), int16(y), int16(width), int16(height), tiles)
+			}
+		}
 	}
 	return true
 }
 func (p *Player) msgPLI_REQUESTUPDATEBOARD(packet []byte) bool {
-	if level, ok := p.server.levels[p.levelName]; ok { for _, change := range level.boardChanges { p.sendPBoardPacket(int16(change.x), int16(change.y), int16(change.width), int16(change.height), bytesToShorts(change.newTiles)) } }
+	if level, ok := p.server.levels[p.levelName]; ok {
+		for _, change := range level.boardChanges {
+			p.sendPBoardPacket(int16(change.x), int16(change.y), int16(change.width), int16(change.height), bytesToShorts(change.newTiles))
+		}
+	}
 	return true
 }
 
@@ -2398,28 +2652,39 @@ func (p *Player) getProp(propId int) []byte {
 	case PLPROP_NICKNAME:
 		buf.WriteGChar(byte(len(p.character.nickName)))
 		buf.data = append(buf.data, p.character.nickName...)
+	case PLPROP_MAXPOWER:
+		buf.WriteGChar(byte(p.maxHitpoints))
+	case PLPROP_CURPOWER:
+		buf.WriteGChar(byte(p.character.hitpoints * 2))
 	case PLPROP_RUPEESCOUNT:
 		buf.WriteGInt(p.rupees)
 	case PLPROP_ARROWSCOUNT:
-		buf.WriteGInt(uint32(p.character.arrows))
+		buf.WriteGChar(byte(p.character.arrows))
 	case PLPROP_BOMBSCOUNT:
-		buf.WriteGInt(uint32(p.character.bombs))
+		buf.WriteGChar(byte(p.character.bombs))
 	case PLPROP_GLOVEPOWER:
 		buf.WriteGChar(byte(p.character.glovePower))
 	case PLPROP_SWORDPOWER:
-		buf.WriteGChar(byte(p.character.swordPower))
+		buf.WriteGChar(byte(p.character.swordPower + 30))
+		buf.WriteGChar(byte(len(p.character.swordImage)))
+		buf.data = append(buf.data, p.character.swordImage...)
 	case PLPROP_SHIELDPOWER:
-		buf.WriteGChar(byte(p.character.shieldPower))
+		buf.WriteGChar(byte(p.character.shieldPower + 10))
+		buf.WriteGChar(byte(len(p.character.shieldImage)))
+		buf.data = append(buf.data, p.character.shieldImage...)
 	case PLPROP_GANI:
 		buf.WriteGChar(byte(len(p.character.gani)))
 		buf.data = append(buf.data, p.character.gani...)
 	case PLPROP_HEADGIF:
-		buf.WriteGChar(byte(len(p.character.headImage)))
+		buf.WriteGChar(byte(len(p.character.headImage) + 100))
 		buf.data = append(buf.data, p.character.headImage...)
+	case PLPROP_CURCHAT:
+		buf.WriteGChar(byte(len(p.character.chatMessage)))
+		buf.data = append(buf.data, p.character.chatMessage...)
 	case PLPROP_COLORS:
-		colors := fmt.Sprintf("%d,%d,%d,%d,%d", p.character.colors[0], p.character.colors[1], p.character.colors[2], p.character.colors[3], p.character.colors[4])
-		buf.WriteGChar(byte(len(colors)))
-		buf.data = append(buf.data, colors...)
+		for i := 0; i < 5; i++ {
+			buf.WriteGChar(p.character.colors[i])
+		}
 	case PLPROP_ID:
 		buf.WriteGShort(p.id)
 	case PLPROP_X:
@@ -2429,19 +2694,25 @@ func (p *Player) getProp(propId int) []byte {
 	case PLPROP_SPRITE:
 		buf.WriteGChar(p.character.sprite)
 	case PLPROP_STATUS:
-		buf.WriteGShort(uint16(p.status))
+		buf.WriteGChar(byte(p.status))
 	case PLPROP_CARRYSPRITE:
-		buf.WriteGShort(uint16(p.carrySprite))
+		buf.WriteGChar(byte(p.carrySprite))
 	case PLPROP_CURLEVEL:
 		buf.WriteGChar(byte(len(p.levelName)))
 		buf.data = append(buf.data, p.levelName...)
 	case PLPROP_HORSEGIF:
 		buf.WriteGChar(byte(len(p.character.horseImage)))
 		buf.data = append(buf.data, p.character.horseImage...)
+	case PLPROP_HORSEBUSHES:
+		buf.WriteGChar(0)
+	case PLPROP_EFFECTCOLORS:
+		buf.WriteGChar(0)
+	case PLPROP_CARRYNPC:
+		buf.WriteGInt(0)
 	case PLPROP_APCOUNTER:
-		buf.WriteGInt(uint32(p.apCounter))
+		buf.WriteGShort(uint16(p.apCounter + 1))
 	case PLPROP_MAGICPOINTS:
-		buf.WriteGInt(uint32(p.mp))
+		buf.WriteGChar(byte(p.mp))
 	case PLPROP_KILLSCOUNT:
 		buf.WriteGInt(p.kills)
 	case PLPROP_DEATHSCOUNT:
@@ -2449,13 +2720,13 @@ func (p *Player) getProp(propId int) []byte {
 	case PLPROP_ONLINESECS:
 		buf.WriteGInt(uint32(p.onlineTime))
 	case PLPROP_IPADDR:
-		buf.WriteGString(p.accountIpStr)
+		buf.WriteGInt5(uint64(p.accountIp))
 	case PLPROP_UDPPORT:
-		buf.WriteGShort(uint16(p.udpport))
+		buf.WriteGInt(uint32(p.udpport))
 	case PLPROP_ALIGNMENT:
 		buf.WriteGChar(byte(p.alignment))
 	case PLPROP_ADDITFLAGS:
-		buf.WriteGString("")
+		buf.WriteGChar(byte(p.additionalFlags))
 	case PLPROP_ACCOUNTNAME:
 		buf.WriteGChar(byte(len(p.accountName)))
 		buf.data = append(buf.data, p.accountName...)
@@ -2463,28 +2734,40 @@ func (p *Player) getProp(propId int) []byte {
 		buf.WriteGChar(byte(len(p.character.bodyImage)))
 		buf.data = append(buf.data, p.character.bodyImage...)
 	case PLPROP_RATING:
-		buf.WriteGInt(uint32(p.eloRating))
+		rating := ((uint32(p.eloRating) & 0xFFF) << 9) | (uint32(p.eloDeviation) & 0x1FF)
+		buf.WriteGInt(rating)
 	case PLPROP_GATTRIB1, PLPROP_GATTRIB2, PLPROP_GATTRIB3, PLPROP_GATTRIB4, PLPROP_GATTRIB5:
 		idx := propId - PLPROP_GATTRIB1
 		if idx < len(p.gAttribs) {
-			buf.WriteGString(p.gAttribs[idx])
+			buf.WriteGChar(byte(len(p.gAttribs[idx])))
+			buf.data = append(buf.data, p.gAttribs[idx]...)
 		} else {
-			buf.WriteGString("")
+			buf.WriteGChar(0)
 		}
 	case PLPROP_JOINLEAVELVL:
 		buf.WriteGChar(1)
 	case PLPROP_PCONNECTED:
-		buf.WriteGChar(1)
+		return buf.Bytes()
 	case PLPROP_PLANGUAGE:
-		buf.WriteGString(p.language)
+		buf.WriteGChar(byte(len(p.language)))
+		buf.data = append(buf.data, p.language...)
 	case PLPROP_PSTATUSMSG:
-		buf.WriteGString(p.statusMsg)
+		buf.WriteGChar(0)
 	case PLPROP_Z:
-		buf.WriteGShort(uint16(p.z))
+		z := int(p.z) / 8
+		if z < -50 {
+			z = -50
+		}
+		if z > 170 {
+			z = 170
+		}
+		buf.WriteGChar(byte(z + 50))
 	case PLPROP_COMMUNITYNAME:
-		buf.WriteGString(p.communityName)
+		buf.WriteGChar(byte(len(p.communityName)))
+		buf.data = append(buf.data, p.communityName...)
 	case PLPROP_OSTYPE:
-		buf.WriteGString(p.os)
+		buf.WriteGChar(byte(len(p.os)))
+		buf.data = append(buf.data, p.os...)
 	case PLPROP_TEXTCODEPAGE:
 		buf.WriteGInt(uint32(p.envCodePage))
 	case PLPROP_X2:
@@ -2505,7 +2788,7 @@ func (p *Player) sendProps(props [PROPCOUNT]bool) {
 	buf := NewBuffer()
 	for propId := 0; propId < PROPCOUNT; propId++ {
 		if props[propId] {
-			buf.WriteByte(byte(propId))
+			buf.WriteGChar(byte(propId))
 			propData := p.getProp(propId)
 			buf.data = append(buf.data, propData...)
 		}
@@ -2520,7 +2803,7 @@ func (p *Player) sendPropsWithArray(props [PROPCOUNT]bool) []byte {
 	buf := NewBuffer()
 	for propId := 0; propId < PROPCOUNT; propId++ {
 		if props[propId] {
-			buf.WriteByte(byte(propId))
+			buf.WriteGChar(byte(propId))
 			propData := p.getProp(propId)
 			buf.data = append(buf.data, propData...)
 		}
@@ -2538,18 +2821,30 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 		p.server.logger.Debug("msgPLI_PLAYERPROPS: propId=%d (raw) decoded=%d val=%q", propId+32, propId, val)
 		switch propId {
 		case PLPROP_NICKNAME:
-			if val != "" && val != "unknown" { p.character.nickName = val }
-		case PLPROP_GANI: p.character.gani = val
-		case PLPROP_BODYIMG: p.character.bodyImage = val
-		case PLPROP_HEADGIF: p.character.headImage = val
+			if val != "" && val != "unknown" {
+				p.character.nickName = val
+			}
+		case PLPROP_GANI:
+			p.character.gani = val
+		case PLPROP_BODYIMG:
+			p.character.bodyImage = val
+		case PLPROP_HEADGIF:
+			p.character.headImage = val
 		case PLPROP_COLORS:
 			colors := splitN(val, ',', 5)
-			for i := 0; i < 5 && i < len(colors); i++ { p.character.colors[i] = uint8(atoi(colors[i])) }
-		case PLPROP_X: p.x = int16(atoi(val))
-		case PLPROP_Y: p.y = int16(atoi(val))
-		case PLPROP_Z: p.z = int16(atoi(val))
-		case PLPROP_CURLEVEL: p.levelName = val
-		case PLPROP_SPRITE: p.character.sprite = uint8(atoi(val))
+			for i := 0; i < 5 && i < len(colors); i++ {
+				p.character.colors[i] = uint8(atoi(colors[i]))
+			}
+		case PLPROP_X:
+			p.x = int16(atoi(val))
+		case PLPROP_Y:
+			p.y = int16(atoi(val))
+		case PLPROP_Z:
+			p.z = int16(atoi(val))
+		case PLPROP_CURLEVEL:
+			p.levelName = val
+		case PLPROP_SPRITE:
+			p.character.sprite = uint8(atoi(val))
 		}
 	}
 	// Forward updated props to other players (PLO_OTHERPLPROPS)
@@ -2581,7 +2876,11 @@ func (p *Player) msgPLI_BOMBDEL(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_TOALL(packet []byte) bool {
-	if len(packet) > 1 { msg := string(packet[1:]); p.lastChat = time.Now(); p.sendPTO_ALL_CHAT(msg) }
+	if len(packet) > 1 {
+		msg := string(packet[1:])
+		p.lastChat = time.Now()
+		p.sendPTO_ALL_CHAT(msg)
+	}
 	return true
 }
 func (p *Player) msgPLI_HORSEADD(packet []byte) bool {
@@ -2612,7 +2911,11 @@ func (p *Player) msgPLI_FIRESPY(packet []byte) bool {
 	x := int16(buf.ReadGShort())
 	y := int16(buf.ReadGShort())
 	if level, ok := p.server.levels[p.levelName]; ok {
-		for _, plId := range level.players { if pl, ok := p.server.players[plId]; ok && pl != p && pl.conn != nil { pl.sendPLO_FIRESPY(x, y, p.accountName) } }
+		for _, plId := range level.players {
+			if pl, ok := p.server.players[plId]; ok && pl != p && pl.conn != nil {
+				pl.sendPLO_FIRESPY(x, y, p.accountName)
+			}
+		}
 	}
 	return true
 }
@@ -2621,7 +2924,11 @@ func (p *Player) msgPLI_THROWCARRIED(packet []byte) bool {
 	x := int16(buf.ReadGShort())
 	y := int16(buf.ReadGShort())
 	if level, ok := p.server.levels[p.levelName]; ok {
-		for _, plId := range level.players { if pl, ok := p.server.players[plId]; ok && pl != p && pl.conn != nil { pl.sendPLO_THROWCARRIED(x, y, p.accountName) } }
+		for _, plId := range level.players {
+			if pl, ok := p.server.players[plId]; ok && pl != p && pl.conn != nil {
+				pl.sendPLO_THROWCARRIED(x, y, p.accountName)
+			}
+		}
 	}
 	return true
 }
@@ -2643,16 +2950,24 @@ func (p *Player) msgPLI_ITEMDEL(packet []byte) bool {
 func (p *Player) msgPLI_CLAIMPKER(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	pkerId := buf.ReadGShort()
-	if pl, ok := p.server.players[uint16(pkerId)]; ok { pl.SetFlag("killer", p.accountName) }
+	if pl, ok := p.server.players[uint16(pkerId)]; ok {
+		pl.SetFlag("killer", p.accountName)
+	}
 	return true
 }
 func (p *Player) msgPLI_BADDYPROPS(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	baddyId := buf.ReadGInt()
 	props := []string{}
-	for buf.Remaining() > 0 { props = append(props, buf.ReadGString()) }
+	for buf.Remaining() > 0 {
+		props = append(props, buf.ReadGString())
+	}
 	if level, ok := p.server.levels[p.levelName]; ok {
-		for _, plId := range level.players { if pl, ok := p.server.players[plId]; ok && pl.conn != nil { pl.sendPLO_BADDYPROPS(baddyId, 0, 0, "", props) } }
+		for _, plId := range level.players {
+			if pl, ok := p.server.players[plId]; ok && pl.conn != nil {
+				pl.sendPLO_BADDYPROPS(baddyId, 0, 0, "", props)
+			}
+		}
 	}
 	return true
 }
@@ -2661,7 +2976,11 @@ func (p *Player) msgPLI_BADDYHURT(packet []byte) bool {
 	baddyId := buf.ReadGInt()
 	hurtPower := buf.ReadGChar()
 	if level, ok := p.server.levels[p.levelName]; ok {
-		for _, plId := range level.players { if pl, ok := p.server.players[plId]; ok && pl.conn != nil { pl.sendPLO_BADDYHURT(baddyId, int(hurtPower)) } }
+		for _, plId := range level.players {
+			if pl, ok := p.server.players[plId]; ok && pl.conn != nil {
+				pl.sendPLO_BADDYHURT(baddyId, int(hurtPower))
+			}
+		}
 	}
 	return true
 }
@@ -2672,7 +2991,11 @@ func (p *Player) msgPLI_BADDYADD(packet []byte) bool {
 	baddyType := buf.ReadGChar()
 	if level, ok := p.server.levels[p.levelName]; ok {
 		level.baddies[uint8(len(level.baddies))] = &LevelBaddy{x: x, y: y, baddyType: uint8(baddyType)}
-		for _, plId := range level.players { if pl, ok := p.server.players[plId]; ok && pl.conn != nil { pl.sendPLO_BADDYPROPS(uint32(len(level.baddies)), int16(x), int16(y), "", []string{}) } }
+		for _, plId := range level.players {
+			if pl, ok := p.server.players[plId]; ok && pl.conn != nil {
+				pl.sendPLO_BADDYPROPS(uint32(len(level.baddies)), int16(x), int16(y), "", []string{})
+			}
+		}
 	}
 	return true
 }
@@ -2725,7 +3048,12 @@ func (p *Player) msgPLI_PUTNPC(packet []byte) bool {
 func (p *Player) msgPLI_NPCDEL(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	npcId := buf.ReadGInt()
-	if level, ok := p.server.levels[p.levelName]; ok { if _, npcOk := level.npcs[npcId]; npcOk { delete(level.npcs, npcId); p.sendPLO_NPCDEL(npcId) } }
+	if level, ok := p.server.levels[p.levelName]; ok {
+		if _, npcOk := level.npcs[npcId]; npcOk {
+			delete(level.npcs, npcId)
+			p.sendPLO_NPCDEL(npcId)
+		}
+	}
 	return true
 }
 func (p *Player) msgPLI_WANTFILE(packet []byte) bool {
@@ -2770,7 +3098,12 @@ func (p *Player) msgPLI_PRIVATEMESSAGE(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	toNick := buf.ReadGString()
 	msg := buf.ReadGString()
-	for _, pl := range p.server.players { if pl.isLoggedIn() && pl.character.nickName == toNick && pl.conn != nil { pl.sendPLO_PRIVATEMESSAGE(p.character.nickName, msg); break } }
+	for _, pl := range p.server.players {
+		if pl.isLoggedIn() && pl.character.nickName == toNick && pl.conn != nil {
+			pl.sendPLO_PRIVATEMESSAGE(p.character.nickName, msg)
+			break
+		}
+	}
 	return true
 }
 func (p *Player) msgPLI_NPCWEAPONDEL(packet []byte) bool {
@@ -2789,12 +3122,18 @@ func (p *Player) msgPLI_UPDATEFILE(packet []byte) bool {
 	fileData := make([]byte, buf.Remaining())
 	copy(fileData, buf.data[buf.read:])
 	p.server.logger.Debug("UPDATEFILE type %d: %s (%d bytes)", fileType, fileName, len(fileData))
-	if err := p.server.config.SaveFile(fileName, fileData); err == nil { p.sendPLO_FILEUPTODATE(fileName) }
+	if err := p.server.config.SaveFile(fileName, fileData); err == nil {
+		p.sendPLO_FILEUPTODATE(fileName)
+	}
 	return true
 }
 func (p *Player) msgPLI_HITOBJECTS(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
-	for buf.BytesLeft() > 0 { objType := buf.ReadGChar(); objId := buf.ReadGInt(); p.server.logger.Debug("HIT object type %d id %d", objType, objId) }
+	for buf.BytesLeft() > 0 {
+		objType := buf.ReadGChar()
+		objId := buf.ReadGInt()
+		p.server.logger.Debug("HIT object type %d id %d", objType, objId)
+	}
 	return true
 }
 func (p *Player) msgPLI_LANGUAGE(packet []byte) bool {
@@ -2807,9 +3146,13 @@ func (p *Player) msgPLI_TRIGGERACTION(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	action := buf.ReadGString()
 	parts := strings.Split(action, ",")
-	if len(parts) == 0 { return true }
+	if len(parts) == 0 {
+		return true
+	}
 	command := parts[0]
-	if p.server.handleTriggerCommand(p, command, parts) { return true }
+	if p.server.handleTriggerCommand(p, command, parts) {
+		return true
+	}
 	if level, ok := p.server.levels[p.levelName]; ok {
 		for _, npc := range level.npcs {
 			if npc.script == action {
@@ -2951,9 +3294,13 @@ func (p *Player) msgPLI_RC_SERVEROPTIONSSET(packet []byte) bool {
 		var filteredOptions []string
 		for _, line := range strings.Split(options, "\n") {
 			line = strings.TrimSpace(line)
-			if line == "" { continue }
+			if line == "" {
+				continue
+			}
 			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 { continue }
+			if len(parts) != 2 {
+				continue
+			}
 			optionName := strings.TrimSpace(parts[0])
 			isAdmin := false
 			for _, admin := range adminOptions {
@@ -4832,7 +5179,7 @@ func (p *Player) msgPLI_UPDATEGANI(packet []byte) bool {
 			scriptStart := strings.Index(ganiStr, "SCRIPT")
 			scriptEnd := strings.Index(ganiStr, "SCRIPTEND")
 			if scriptStart != -1 && scriptEnd != -1 {
-				scriptCode := ganiStr[scriptStart+7:scriptEnd]
+				scriptCode := ganiStr[scriptStart+7 : scriptEnd]
 				p.server.logger.Debug("Sending gani script for %s", ganiFile)
 				outBuf := NewBuffer()
 				outBuf.WriteByte(PLO_RAWDATA)
@@ -4953,18 +5300,18 @@ type LevelTiles struct {
 type LevelItemType int
 
 const (
-	BDPROP_ID         = 0
-	BDPROP_X          = 1
-	BDPROP_Y          = 2
-	BDPROP_TYPE       = 3
-	BDPROP_POWERIMAGE = 4
-	BDPROP_MODE       = 5
-	BDPROP_ANI        = 6
-	BDPROP_DIR        = 7
-	BDPROP_VERSESIGHT = 8
-	BDPROP_VERSEHURT  = 9
+	BDPROP_ID          = 0
+	BDPROP_X           = 1
+	BDPROP_Y           = 2
+	BDPROP_TYPE        = 3
+	BDPROP_POWERIMAGE  = 4
+	BDPROP_MODE        = 5
+	BDPROP_ANI         = 6
+	BDPROP_DIR         = 7
+	BDPROP_VERSESIGHT  = 8
+	BDPROP_VERSEHURT   = 9
 	BDPROP_VERSEATTACK = 10
-	BDPROP_COUNT      = 11
+	BDPROP_COUNT       = 11
 )
 
 const (
@@ -4999,22 +5346,24 @@ var baddyPower = []int{
 }
 
 type LevelBaddy struct {
-	server           *Server
-	level            *Level
-	mu               sync.RWMutex
-	baddyType        byte
-	id               byte
+	server                *Server
+	level                 *Level
+	mu                    sync.RWMutex
+	baddyType             byte
+	id                    byte
 	power, mode, ani, dir byte
-	x, y, startX, startY float32
-	image            string
-	verses           [3]string
-	canRespawn       bool
-	hasCustomImage   bool
-	timeout          time.Time
+	x, y, startX, startY  float32
+	image                 string
+	verses                [3]string
+	canRespawn            bool
+	hasCustomImage        bool
+	timeout               time.Time
 }
 
 func NewLevelBaddy(x float32, y float32, baddyType byte, level *Level, server *Server) *LevelBaddy {
-	if baddyType >= baddyTypes { baddyType = 0 }
+	if baddyType >= baddyTypes {
+		baddyType = 0
+	}
 	return &LevelBaddy{server: server, level: level, baddyType: baddyType, x: x, y: y, startX: x, startY: y, canRespawn: true}
 }
 
@@ -5038,7 +5387,9 @@ func (lb *LevelBaddy) dropItem() {
 	case 0, 1, 2, 3, 4, 5:
 		itemType = getItemId(strconv.Itoa(itemId))
 	default:
-		if itemId > 5 && itemId < 10 { itemType = ItemGreenRupee }
+		if itemId > 5 && itemId < 10 {
+			itemType = ItemGreenRupee
+		}
 	}
 	if itemType != LevelItemType(-1) {
 		if lb.level != nil {
@@ -5051,7 +5402,9 @@ func (lb *LevelBaddy) dropItem() {
 			buf.WriteByte(byte(lb.y * 2))
 			buf.WriteByte(byte(itemType))
 			for _, pid := range lb.level.players {
-				if pl, ok := lb.server.players[pid]; ok { pl.SendPacket(buf.Bytes()) }
+				if pl, ok := lb.server.players[pid]; ok {
+					pl.SendPacket(buf.Bytes())
+				}
 			}
 		}
 	}
@@ -5114,11 +5467,19 @@ func (lb *LevelBaddy) setProps(data []byte) {
 			lb.id = buf.ReadGChar()
 		case BDPROP_X:
 			val := float32(buf.ReadGChar()) / 2.0
-			if val < 0 { val = 0 } else if val > 63.5 { val = 63.5 }
+			if val < 0 {
+				val = 0
+			} else if val > 63.5 {
+				val = 63.5
+			}
 			lb.x = val
 		case BDPROP_Y:
 			val := float32(buf.ReadGChar()) / 2.0
-			if val < 0 { val = 0 } else if val > 63.5 { val = 63.5 }
+			if val < 0 {
+				val = 0
+			} else if val > 63.5 {
+				val = 63.5
+			}
 			lb.y = val
 		case BDPROP_TYPE:
 			lb.baddyType = byte(buf.ReadGChar())
@@ -5142,7 +5503,9 @@ func (lb *LevelBaddy) setProps(data []byte) {
 				lb.timeout = time.Now().Add(2 * time.Second)
 			} else if lb.mode == BDMODE_DIE {
 				lb.timeout = time.Now().Add(2 * time.Second)
-				if lb.server.settings.GetBool("baddyitems", false) { go lb.dropItem() }
+				if lb.server.settings.GetBool("baddyitems", false) {
+					go lb.dropItem()
+				}
 			} else if lb.mode == BDMODE_DEAD {
 				if lb.canRespawn {
 					respawnTime := lb.server.settings.GetInt("baddyrespawntime", 60)
@@ -5167,8 +5530,13 @@ func (lb *LevelBaddy) setProps(data []byte) {
 	}
 }
 
-func (lb *LevelBaddy) setRespawn(respawn bool) { lb.mu.Lock(); defer lb.mu.Unlock(); lb.canRespawn = respawn }
+func (lb *LevelBaddy) setRespawn(respawn bool) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	lb.canRespawn = respawn
+}
 func (lb *LevelBaddy) setId(id byte) { lb.mu.Lock(); defer lb.mu.Unlock(); lb.id = id }
+
 type LevelBoardChange struct {
 	x, y, width, height int
 	newTiles, oldTiles  []byte
@@ -5194,15 +5562,16 @@ func (lbc *LevelBoardChange) SwapTiles() {
 	lbc.newTiles, lbc.oldTiles = lbc.oldTiles, lbc.newTiles
 }
 
-func (lbc *LevelBoardChange) GetX() int { return lbc.x }
-func (lbc *LevelBoardChange) GetY() int { return lbc.y }
-func (lbc *LevelBoardChange) GetWidth() int { return lbc.width }
-func (lbc *LevelBoardChange) GetHeight() int { return lbc.height }
-func (lbc *LevelBoardChange) GetTiles() []byte { return lbc.newTiles }
-func (lbc *LevelBoardChange) GetModTime() time.Time { return lbc.time }
+func (lbc *LevelBoardChange) GetX() int              { return lbc.x }
+func (lbc *LevelBoardChange) GetY() int              { return lbc.y }
+func (lbc *LevelBoardChange) GetWidth() int          { return lbc.width }
+func (lbc *LevelBoardChange) GetHeight() int         { return lbc.height }
+func (lbc *LevelBoardChange) GetTiles() []byte       { return lbc.newTiles }
+func (lbc *LevelBoardChange) GetModTime() time.Time  { return lbc.time }
 func (lbc *LevelBoardChange) SetModTime(t time.Time) { lbc.time = t }
-func (lbc *LevelBoardChange) GetTimeout() time.Time { return lbc.timeout }
-func (lbc *LevelBoardChange) IsExpired() bool { return time.Now().After(lbc.timeout) }
+func (lbc *LevelBoardChange) GetTimeout() time.Time  { return lbc.timeout }
+func (lbc *LevelBoardChange) IsExpired() bool        { return time.Now().After(lbc.timeout) }
+
 type LevelChest struct {
 	x, y      int
 	itemType  LevelItemType
@@ -5218,10 +5587,10 @@ type LevelItem struct {
 	itemType LevelItemType
 }
 type LevelLink struct {
-	x, y                    float32
-	width, height           float32
-	destLevel               string
-	destX, destY            float32
+	x, y          float32
+	width, height float32
+	destLevel     string
+	destX, destY  float32
 }
 
 func NewLevelLink() *LevelLink { return &LevelLink{} }
@@ -5231,11 +5600,17 @@ func (ll *LevelLink) GetLinkStr() string {
 }
 
 func (ll *LevelLink) ParseLinkStr(parts []string) {
-	if len(parts) < 7 { return }
+	if len(parts) < 7 {
+		return
+	}
 	offset := 0
-	if len(parts) > 7 { offset = len(parts) - 7 }
+	if len(parts) > 7 {
+		offset = len(parts) - 7
+	}
 	ll.destLevel = parts[0]
-	for i := 0; i < offset; i++ { ll.destLevel += " " + parts[1+i] }
+	for i := 0; i < offset; i++ {
+		ll.destLevel += " " + parts[1+i]
+	}
 	ll.x = parseFloat(parts[1+offset])
 	ll.y = parseFloat(parts[2+offset])
 	ll.width = parseFloat(parts[3+offset])
@@ -5245,24 +5620,25 @@ func (ll *LevelLink) ParseLinkStr(parts []string) {
 }
 
 func (ll *LevelLink) GetNewLevel() string { return ll.destLevel }
-func (ll *LevelLink) GetNewX() float32 { return ll.destX }
-func (ll *LevelLink) GetNewY() float32 { return ll.destY }
-func (ll *LevelLink) GetX() float32 { return ll.x }
-func (ll *LevelLink) GetY() float32 { return ll.y }
-func (ll *LevelLink) GetWidth() float32 { return ll.width }
-func (ll *LevelLink) GetHeight() float32 { return ll.height }
+func (ll *LevelLink) GetNewX() float32    { return ll.destX }
+func (ll *LevelLink) GetNewY() float32    { return ll.destY }
+func (ll *LevelLink) GetX() float32       { return ll.x }
+func (ll *LevelLink) GetY() float32       { return ll.y }
+func (ll *LevelLink) GetWidth() float32   { return ll.width }
+func (ll *LevelLink) GetHeight() float32  { return ll.height }
 
 func (ll *LevelLink) SetNewLevel(level string) { ll.destLevel = level }
-func (ll *LevelLink) SetNewX(x float32) { ll.destX = x }
-func (ll *LevelLink) SetNewY(y float32) { ll.destY = y }
-func (ll *LevelLink) SetX(x float32) { ll.x = x }
-func (ll *LevelLink) SetY(y float32) { ll.y = y }
-func (ll *LevelLink) SetWidth(w float32) { ll.width = w }
-func (ll *LevelLink) SetHeight(h float32) { ll.height = h }
+func (ll *LevelLink) SetNewX(x float32)        { ll.destX = x }
+func (ll *LevelLink) SetNewY(y float32)        { ll.destY = y }
+func (ll *LevelLink) SetX(x float32)           { ll.x = x }
+func (ll *LevelLink) SetY(y float32)           { ll.y = y }
+func (ll *LevelLink) SetWidth(w float32)       { ll.width = w }
+func (ll *LevelLink) SetHeight(h float32)      { ll.height = h }
+
 type LevelSign struct {
-	x, y              int
-	text              string
-	unformattedText   string
+	x, y            int
+	text            string
+	unformattedText string
 }
 
 func NewLevelSign(x, y int, sign string, encoded bool) *LevelSign {
@@ -5281,16 +5657,20 @@ func (ls *LevelSign) GetSignStr(player *Player) []byte {
 	buf := NewBuffer()
 	buf.WriteGChar(byte(ls.x))
 	buf.WriteGChar(byte(ls.y))
-	if player != nil { buf.Write([]byte(encodeSign(ls.unformattedText))) } else { buf.Write([]byte(ls.text)) }
+	if player != nil {
+		buf.Write([]byte(encodeSign(ls.unformattedText)))
+	} else {
+		buf.Write([]byte(ls.text))
+	}
 	return buf.Bytes()
 }
 
-func (ls *LevelSign) GetX() int { return ls.x }
-func (ls *LevelSign) GetY() int { return ls.y }
-func (ls *LevelSign) GetText() string { return ls.text }
+func (ls *LevelSign) GetX() int        { return ls.x }
+func (ls *LevelSign) GetY() int        { return ls.y }
+func (ls *LevelSign) GetText() string  { return ls.text }
 func (ls *LevelSign) GetUText() string { return ls.unformattedText }
-func (ls *LevelSign) SetX(value int) { ls.x = value }
-func (ls *LevelSign) SetY(value int) { ls.y = value }
+func (ls *LevelSign) SetX(value int)   { ls.x = value }
+func (ls *LevelSign) SetY(value int)   { ls.y = value }
 
 func (ls *LevelSign) SetText(value string) {
 	ls.text = value
@@ -5304,6 +5684,7 @@ func (ls *LevelSign) SetUText(value string) {
 
 const signText = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?-.,#>()#####\"####':/~&### <####;\n"
 const signSymbols = "ABXYudlrhxyz#4."
+
 var ctablen = []int{1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 2, 1}
 var ctabindex = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 15, 17}
 var ctab = []byte{91, 92, 93, 94, 77, 78, 79, 80, 74, 75, 71, 72, 73, 86, 86, 87, 88, 67}
@@ -5317,7 +5698,9 @@ func encodeSignCode(text string) []byte {
 			letter = text[i]
 			code := strings.IndexByte(signSymbols, letter)
 			if code != -1 {
-				for ii := 0; ii < ctablen[code]; ii++ { buf.WriteGChar(ctab[ctabindex[code]+ii] - 32) }
+				for ii := 0; ii < ctablen[code]; ii++ {
+					buf.WriteGChar(ctab[ctabindex[code]+ii] - 32)
+				}
 				continue
 			} else {
 				i--
@@ -5325,7 +5708,9 @@ func encodeSignCode(text string) []byte {
 			}
 		}
 		code := strings.IndexByte(signText, letter)
-		if letter == '#' { code = 86 }
+		if letter == '#' {
+			code = 86
+		}
 		if code != -1 {
 			buf.WriteGChar(byte(code))
 		} else if letter != '\r' {
@@ -5335,7 +5720,9 @@ func encodeSignCode(text string) []byte {
 			scode := fmt.Sprintf("%d", letter)
 			for j := 0; j < len(scode); j++ {
 				c := strings.IndexByte(signText, scode[j])
-				if c != -1 { buf.WriteGChar(byte(c)) }
+				if c != -1 {
+					buf.WriteGChar(byte(c))
+				}
 			}
 			buf.WriteGChar(70 - 32)
 		}
@@ -5381,7 +5768,9 @@ func decodeSignCode(data []byte) string {
 func encodeSign(signText string) string {
 	lines := strings.Split(signText, "\n")
 	var result strings.Builder
-	for _, line := range lines { result.Write(encodeSignCode(line + "\n")) }
+	for _, line := range lines {
+		result.Write(encodeSignCode(line + "\n"))
+	}
 	return result.String()
 }
 
@@ -5421,12 +5810,16 @@ var itemList = []string{
 
 func getItemId(itemName string) LevelItemType {
 	for i, name := range itemList {
-		if name == itemName { return LevelItemType(i) }
+		if name == itemName {
+			return LevelItemType(i)
+		}
 	}
 	return LevelItemType(-1)
 }
 func getItemName(itemType LevelItemType) string {
-	if int(itemType) < 0 || int(itemType) >= len(itemList) { return "" }
+	if int(itemType) < 0 || int(itemType) >= len(itemList) {
+		return ""
+	}
 	return itemList[itemType]
 }
 func getItemPlayerProp(itemType LevelItemType, player *Player) []byte {
@@ -5434,66 +5827,99 @@ func getItemPlayerProp(itemType LevelItemType, player *Player) []byte {
 	switch itemType {
 	case ItemGreenRupee, ItemBlueRupee, ItemRedRupee, ItemGoldRupee:
 		rupeeCount := int(player.character.gralats)
-		if itemType == ItemGoldRupee { rupeeCount += 100 } else if itemType == ItemRedRupee { rupeeCount += 30 } else if itemType == ItemBlueRupee { rupeeCount += 5 } else { rupeeCount += 1 }
-		if rupeeCount > 9999999 { rupeeCount = 9999999 }
-		buf.WriteByte(PLPROP_RUPEESCOUNT)
-		buf.WriteInt(int32(rupeeCount))
+		if itemType == ItemGoldRupee {
+			rupeeCount += 100
+		} else if itemType == ItemRedRupee {
+			rupeeCount += 30
+		} else if itemType == ItemBlueRupee {
+			rupeeCount += 5
+		} else {
+			rupeeCount += 1
+		}
+		if rupeeCount > 9999999 {
+			rupeeCount = 9999999
+		}
+		buf.WriteGChar(PLPROP_RUPEESCOUNT)
+		buf.WriteGInt(uint32(rupeeCount))
 	case ItemBombs:
 		bombCount := int(player.character.bombs) + 5
-		if bombCount > 99 { bombCount = 99 }
-		buf.WriteByte(PLPROP_BOMBSCOUNT)
-		buf.WriteByte(byte(bombCount))
+		if bombCount > 99 {
+			bombCount = 99
+		}
+		buf.WriteGChar(PLPROP_BOMBSCOUNT)
+		buf.WriteGChar(byte(bombCount))
 	case ItemDarts:
 		arrowCount := int(player.character.arrows) + 5
-		if arrowCount > 99 { arrowCount = 99 }
-		buf.WriteByte(PLPROP_ARROWSCOUNT)
-		buf.WriteByte(byte(arrowCount))
+		if arrowCount > 99 {
+			arrowCount = 99
+		}
+		buf.WriteGChar(PLPROP_ARROWSCOUNT)
+		buf.WriteGChar(byte(arrowCount))
 	case ItemHeart:
 		newPower := float64(player.character.hitpoints) + 1.0
 		maxPower := float64(player.maxHitpoints)
-		if newPower > maxPower { newPower = maxPower }
-		buf.WriteByte(PLPROP_CURPOWER)
-		buf.WriteByte(byte(int(newPower * 2)))
+		if newPower > maxPower {
+			newPower = maxPower
+		}
+		buf.WriteGChar(PLPROP_CURPOWER)
+		buf.WriteGChar(byte(int(newPower * 2)))
 	case ItemGlove1, ItemGlove2:
 		glovePower := int(player.character.glovePower)
-		if itemType == ItemGlove2 { glovePower = 3 } else if glovePower < 2 { glovePower = 2 }
-		buf.WriteByte(PLPROP_GLOVEPOWER)
-		buf.WriteByte(byte(glovePower))
+		if itemType == ItemGlove2 {
+			glovePower = 3
+		} else if glovePower < 2 {
+			glovePower = 2
+		}
+		buf.WriteGChar(PLPROP_GLOVEPOWER)
+		buf.WriteGChar(byte(glovePower))
 	case ItemBow, ItemBomb, ItemSuperBomb, ItemFireball, ItemFireblast, ItemNukeshot, ItemJoltbomb:
 		player.addWeapon(getItemName(itemType))
 		return nil
 	case ItemShield, ItemMirrorShield, ItemLizardShield:
 		newShieldPower := 1
-		if itemType == ItemLizardShield { newShieldPower = 3 } else if itemType == ItemMirrorShield { newShieldPower = 2 }
-		if int(player.character.shieldPower) > newShieldPower { newShieldPower = int(player.character.shieldPower) }
-		buf.WriteByte(PLPROP_SHIELDPOWER)
-		buf.WriteByte(byte(newShieldPower + 10))
+		if itemType == ItemLizardShield {
+			newShieldPower = 3
+		} else if itemType == ItemMirrorShield {
+			newShieldPower = 2
+		}
+		if int(player.character.shieldPower) > newShieldPower {
+			newShieldPower = int(player.character.shieldPower)
+		}
+		buf.WriteGChar(PLPROP_SHIELDPOWER)
+		buf.WriteGChar(byte(newShieldPower + 10))
 	case ItemSword, ItemBattleAxe, ItemLizardSword, ItemGoldenSword:
 		swordPower := int(player.character.swordPower)
 		if itemType == ItemGoldenSword {
 			swordPower = 4
 		} else if itemType == ItemLizardSword {
-			if swordPower < 3 { swordPower = 3 }
+			if swordPower < 3 {
+				swordPower = 3
+			}
 		} else if itemType == ItemBattleAxe {
-			if swordPower < 2 { swordPower = 2 }
+			if swordPower < 2 {
+				swordPower = 2
+			}
 		} else {
-			if swordPower < 1 { swordPower = 1 }
+			if swordPower < 1 {
+				swordPower = 1
+			}
 		}
-		buf.WriteByte(PLPROP_SWORDPOWER)
-		buf.WriteByte(byte(swordPower + 30))
+		buf.WriteGChar(PLPROP_SWORDPOWER)
+		buf.WriteGChar(byte(swordPower + 30))
 	case ItemFullHeart:
 		heartMax := int(player.maxHitpoints) + 1
-		if heartMax > 20 { heartMax = 20 }
-		buf.WriteByte(PLPROP_MAXPOWER)
-		buf.WriteByte(byte(heartMax))
-		buf.WriteByte(PLPROP_CURPOWER)
-		buf.WriteByte(byte(heartMax * 2))
+		if heartMax > 20 {
+			heartMax = 20
+		}
+		buf.WriteGChar(PLPROP_MAXPOWER)
+		buf.WriteGChar(byte(heartMax))
+		buf.WriteGChar(PLPROP_CURPOWER)
+		buf.WriteGChar(byte(heartMax * 2))
 	case ItemSpinattack:
 		return nil
 	}
 	return buf.Bytes()
 }
-
 
 func NewLevel() *Level {
 	return &Level{
@@ -5503,41 +5929,64 @@ func NewLevel() *Level {
 }
 func getBase64Position(c byte) int {
 	switch {
-	case c >= 'a' && c <= 'z': return 26 + int(c-'a')
-	case c >= 'A' && c <= 'Z': return int(c - 'A')
-	case c >= '0' && c <= '9': return 52 + int(c-'0')
-	case c == '+': return 62
-	case c == '/': return 63
+	case c >= 'a' && c <= 'z':
+		return 26 + int(c-'a')
+	case c >= 'A' && c <= 'Z':
+		return int(c - 'A')
+	case c >= '0' && c <= '9':
+		return 52 + int(c-'0')
+	case c == '+':
+		return 62
+	case c == '/':
+		return 63
 	}
 	return 0
 }
 func (l *Level) loadLevel(server *Server, levelName string) bool {
-	if strings.HasSuffix(strings.ToLower(levelName), ".nw") { return l.loadNW(server, levelName) }
-	if strings.HasSuffix(strings.ToLower(levelName), ".zelda") { return l.loadZelda(server, levelName) }
+	if strings.HasSuffix(strings.ToLower(levelName), ".nw") {
+		return l.loadNW(server, levelName)
+	}
+	if strings.HasSuffix(strings.ToLower(levelName), ".zelda") {
+		return l.loadZelda(server, levelName)
+	}
 	return false
 }
 func (l *Level) loadNW(server *Server, levelName string) bool {
 	l.levelName = levelName
 	lines, err := server.config.LoadFileAsLines(levelName)
-	if err != nil { return false }
-	if len(lines) == 0 { return false }
+	if err != nil {
+		return false
+	}
+	if len(lines) == 0 {
+		return false
+	}
 	l.fileVersion = lines[0]
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 		parts := strings.Fields(line)
-		if len(parts) == 0 { continue }
+		if len(parts) == 0 {
+			continue
+		}
 		switch parts[0] {
 		case "BOARD":
-			if len(parts) != 6 { continue }
+			if len(parts) != 6 {
+				continue
+			}
 			x, _ := strconv.Atoi(parts[1])
 			y, _ := strconv.Atoi(parts[2])
 			w, _ := strconv.Atoi(parts[3])
 			layer, _ := strconv.Atoi(parts[4])
-			if x < 0 || x >= 64 || y < 0 || y >= 64 || w <= 0 || x+w > 64 { continue }
+			if x < 0 || x >= 64 || y < 0 || y >= 64 || w <= 0 || x+w > 64 {
+				continue
+			}
 			data := parts[5]
 			if len(data) >= w*2 {
-				if l.tiles[uint8(layer)] == nil { l.tiles[uint8(layer)] = &LevelTiles{tiles: make([]int16, 4096)} }
+				if l.tiles[uint8(layer)] == nil {
+					l.tiles[uint8(layer)] = &LevelTiles{tiles: make([]int16, 4096)}
+				}
 				for ii := 0; ii < w; ii++ {
 					left := getBase64Position(data[ii*2])
 					right := getBase64Position(data[ii*2+1])
@@ -5546,14 +5995,18 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 				}
 			}
 		case "CHEST":
-			if len(parts) != 5 { continue }
+			if len(parts) != 5 {
+				continue
+			}
 			chestx, _ := strconv.Atoi(parts[1])
 			chesty, _ := strconv.Atoi(parts[2])
 			itemType := getItemId(parts[3])
 			signIdx, _ := strconv.Atoi(parts[4])
 			l.chests = append(l.chests, &LevelChest{x: chestx, y: chesty, itemType: itemType, signIndex: signIdx})
 		case "SIGN":
-			if len(parts) != 3 { continue }
+			if len(parts) != 3 {
+				continue
+			}
 			signx, _ := strconv.Atoi(parts[1])
 			signy, _ := strconv.Atoi(parts[2])
 			var text strings.Builder
@@ -5564,7 +6017,9 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 			}
 			l.signs = append(l.signs, NewLevelSign(signx, signy, text.String(), false))
 		case "LINK":
-			if len(parts) < 8 { continue }
+			if len(parts) < 8 {
+				continue
+			}
 			linkx, _ := strconv.ParseFloat(parts[1], 32)
 			linky, _ := strconv.ParseFloat(parts[2], 32)
 			destX, _ := strconv.ParseFloat(parts[4], 32)
@@ -5572,17 +6027,23 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 			destLevel := strings.Join(parts[6:len(parts)-1], " ")
 			l.links = append(l.links, &LevelLink{x: float32(linkx), y: float32(linky), destLevel: destLevel, destX: float32(destX), destY: float32(destY)})
 		case "BADDY":
-			if len(parts) != 4 { continue }
+			if len(parts) != 4 {
+				continue
+			}
 			bx, _ := strconv.Atoi(parts[1])
 			by, _ := strconv.Atoi(parts[2])
 			btype, _ := strconv.Atoi(parts[3])
 			l.baddies[uint8(len(l.baddies))] = &LevelBaddy{x: float32(bx), y: float32(by), baddyType: byte(btype)}
 		case "NPC":
-			if len(parts) < 4 { continue }
+			if len(parts) < 4 {
+				continue
+			}
 			npcx, _ := strconv.ParseFloat(parts[2], 32)
 			npcy, _ := strconv.ParseFloat(parts[3], 32)
 			image := parts[1]
-			if len(parts) > 4 { image = strings.Join(parts[1:len(parts)-2], " ") }
+			if len(parts) > 4 {
+				image = strings.Join(parts[1:len(parts)-2], " ")
+			}
 			var script strings.Builder
 			i++
 			for i < len(lines) && strings.TrimSpace(lines[i]) != "NPCEND" {
@@ -5590,7 +6051,9 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 				i++
 			}
 			npc := &NPC{npcType: LEVELNPC, x: int16(npcx), y: int16(npcy), z: 0, image: image, script: script.String(), level: l, saves: [10]byte{}}
-			if server.AddNPC(npc) { l.npcs[npc.id] = npc }
+			if server.AddNPC(npc) {
+				l.npcs[npc.id] = npc
+			}
 		}
 	}
 	return true
@@ -5598,10 +6061,12 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 func (l *Level) loadZelda(server *Server, levelName string) bool {
 	levelPath := "world/levels/" + levelName + ".zelda"
 	data, err := server.config.LoadFile(levelPath)
-	if err != nil { return false }
+	if err != nil {
+		return false
+	}
 	buf := NewBufferFromBytes(data)
 	l.levelName = levelName
-	version := string(buf.data[buf.read:buf.read+8])
+	version := string(buf.data[buf.read : buf.read+8])
 	buf.read += 8
 	var bits int
 	if version == "Z3-V1.03" {
@@ -5780,29 +6245,41 @@ func (l *Level) getPlayers() []uint16 {
 }
 func (l *Level) getBoardPacket() []byte {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_BOARDPACKET)
+	buf.WriteGChar(PLO_BOARDPACKET)
 	mainLayer := l.tiles[0]
 	if mainLayer != nil && len(mainLayer.tiles) == 4096 {
 		for i := 0; i < 4096; i++ {
 			tile := mainLayer.tiles[i]
-			buf.WriteByte(byte(tile >> 8))
 			buf.WriteByte(byte(tile & 0xFF))
+			buf.WriteByte(byte(uint16(tile) >> 8))
 		}
 	} else {
-		for i := 0; i < 8192; i++ { buf.WriteByte(0) }
+		for i := 0; i < 8192; i++ {
+			buf.WriteByte(0)
+		}
 	}
 	buf.WriteByte('\n')
 	return buf.Bytes()
 }
 func (l *Level) getTileAt(x, y int) int16 {
-	if x < 0 || x >= 64 || y < 0 || y >= 64 { return 0 }
-	if l.tiles[0] != nil && len(l.tiles[0].tiles) == 4096 { return l.tiles[0].tiles[x+y*64] }
+	if x < 0 || x >= 64 || y < 0 || y >= 64 {
+		return 0
+	}
+	if l.tiles[0] != nil && len(l.tiles[0].tiles) == 4096 {
+		return l.tiles[0].tiles[x+y*64]
+	}
 	return 0
 }
 func (l *Level) setTileAt(x, y int, tile int16) {
-	if x < 0 || x >= 64 || y < 0 || y >= 64 { return }
-	if l.tiles[0] == nil { l.tiles[0] = &LevelTiles{tiles: make([]int16, 4096)} }
-	if len(l.tiles[0].tiles) == 4096 { l.tiles[0].tiles[x+y*64] = tile }
+	if x < 0 || x >= 64 || y < 0 || y >= 64 {
+		return
+	}
+	if l.tiles[0] == nil {
+		l.tiles[0] = &LevelTiles{tiles: make([]int16, 4096)}
+	}
+	if len(l.tiles[0].tiles) == 4096 {
+		l.tiles[0].tiles[x+y*64] = tile
+	}
 }
 
 func (l *Level) removeBaddy(id uint8) {
@@ -5866,19 +6343,19 @@ const (
 type MapLevel struct{ mapx, mapy int }
 
 type Map struct {
-	server             *Server
-	mapType            MapType
-	modTime            time.Time
-	width, height      int
-	groupMap           bool
-	loadFullMap        bool
-	mapName            string
-	mapImage           string
-	miniMapImage       string
-	levels             map[string]MapLevel
-	levelList          []string
-	preloadLevelList   []string
-	mu                 sync.RWMutex
+	server           *Server
+	mapType          MapType
+	modTime          time.Time
+	width, height    int
+	groupMap         bool
+	loadFullMap      bool
+	mapName          string
+	mapImage         string
+	miniMapImage     string
+	levels           map[string]MapLevel
+	levelList        []string
+	preloadLevelList []string
+	mu               sync.RWMutex
 }
 
 func NewMap(mapType MapType, groupMap bool) *Map {
@@ -5888,27 +6365,35 @@ func NewMap(mapType MapType, groupMap bool) *Map {
 func (m *Map) IsLevelOnMap(level string) (bool, int, int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if ml, ok := m.levels[strings.ToLower(level)]; ok { return true, ml.mapx, ml.mapy }
+	if ml, ok := m.levels[strings.ToLower(level)]; ok {
+		return true, ml.mapx, ml.mapy
+	}
 	return false, -1, -1
 }
 
 func (m *Map) GetLevelAt(mx, my int) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if mx >= 0 && mx < m.width && my >= 0 && my < m.height { return m.levelList[mx+my*m.width] }
+	if mx >= 0 && mx < m.width && my >= 0 && my < m.height {
+		return m.levelList[mx+my*m.width]
+	}
 	return ""
 }
 
 func (m *Map) GetMapName() string { return m.mapName }
-func (m *Map) GetType() MapType { return m.mapType }
-func (m *Map) GetWidth() int { return m.width }
-func (m *Map) GetHeight() int { return m.height }
-func (m *Map) IsBigMap() bool { return m.mapType == MapTypeBigMap }
-func (m *Map) IsGmap() bool { return m.mapType == MapTypeGmap }
-func (m *Map) IsGroupMap() bool { return m.groupMap }
+func (m *Map) GetType() MapType   { return m.mapType }
+func (m *Map) GetWidth() int      { return m.width }
+func (m *Map) GetHeight() int     { return m.height }
+func (m *Map) IsBigMap() bool     { return m.mapType == MapTypeBigMap }
+func (m *Map) IsGmap() bool       { return m.mapType == MapTypeGmap }
+func (m *Map) IsGroupMap() bool   { return m.groupMap }
 
 func (m *Map) Load(fileName string) error {
-	if m.mapType == MapTypeBigMap { return m.loadBigMap(fileName) } else if m.mapType == MapTypeGmap { return m.loadGMap(fileName) }
+	if m.mapType == MapTypeBigMap {
+		return m.loadBigMap(fileName)
+	} else if m.mapType == MapTypeGmap {
+		return m.loadGMap(fileName)
+	}
 	return nil
 }
 
@@ -5916,7 +6401,9 @@ func (m *Map) loadBigMap(fileName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	data, err := m.server.config.LoadFile(fileName)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	m.modTime, _ = m.server.config.FileModTime(fileName)
 	m.mapName = fileName
 	lines := strings.Split(string(data), "\n")
@@ -5926,13 +6413,21 @@ func (m *Map) loadBigMap(fileName string) error {
 	var mapData [][]string
 	for _, line := range lines {
 		line = strings.TrimSpace(strings.ReplaceAll(line, "\r", ""))
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 		levelList := strings.Split(guntokenize(line), "\n")
 		empty := 0
-		for _, lvl := range levelList { if lvl == "" { empty++ } }
+		for _, lvl := range levelList {
+			if lvl == "" {
+				empty++
+			}
+		}
 		currentWidth := len(levelList) - empty
 		m.height++
-		if currentWidth > m.width { m.width = currentWidth }
+		if currentWidth > m.width {
+			m.width = currentWidth
+		}
 		mapData = append(mapData, levelList)
 	}
 	levelMap := make([]string, m.width*m.height)
@@ -5955,7 +6450,9 @@ func (m *Map) loadGMap(fileName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	data, err := m.server.config.LoadFile(fileName)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	m.modTime, _ = m.server.config.FileModTime(fileName)
 	m.mapName = fileName
 	m.levels = make(map[string]MapLevel)
@@ -5964,14 +6461,22 @@ func (m *Map) loadGMap(fileName string) error {
 	lines := strings.Split(string(data), "\n")
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(strings.ReplaceAll(lines[i], "\r", ""))
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 		parts := strings.Fields(line)
-		if len(parts) == 0 { continue }
+		if len(parts) == 0 {
+			continue
+		}
 		switch parts[0] {
 		case "WIDTH":
-			if len(parts) == 2 { m.width, _ = strconv.Atoi(parts[1]) }
+			if len(parts) == 2 {
+				m.width, _ = strconv.Atoi(parts[1])
+			}
 		case "HEIGHT":
-			if len(parts) == 2 { m.height, _ = strconv.Atoi(parts[1]) }
+			if len(parts) == 2 {
+				m.height, _ = strconv.Atoi(parts[1])
+			}
 		case "GENERATED":
 		case "LEVELNAMES":
 			i++
@@ -5979,8 +6484,13 @@ func (m *Map) loadGMap(fileName string) error {
 			levelMap := make([]string, m.width*m.height)
 			for i < len(lines) {
 				line := strings.TrimSpace(strings.ReplaceAll(lines[i], "\r", ""))
-				if line == "" { i++; continue }
-				if line == "LEVELNAMESEND" { break }
+				if line == "" {
+					i++
+					continue
+				}
+				if line == "LEVELNAMESEND" {
+					break
+				}
 				if gmapy < m.height {
 					line = guntokenize(line)
 					names := strings.Split(line, "\n")
@@ -5999,9 +6509,13 @@ func (m *Map) loadGMap(fileName string) error {
 			}
 			m.levelList = levelMap
 		case "MAPIMG":
-			if len(parts) == 2 { m.mapImage = parts[1] }
+			if len(parts) == 2 {
+				m.mapImage = parts[1]
+			}
 		case "MINIMAPIMG":
-			if len(parts) == 2 { m.miniMapImage = parts[1] }
+			if len(parts) == 2 {
+				m.miniMapImage = parts[1]
+			}
 		case "NOAUTOMAPPING":
 		case "LOADFULLMAP":
 			m.loadFullMap = true
@@ -6010,7 +6524,9 @@ func (m *Map) loadGMap(fileName string) error {
 			i++
 			for i < len(lines) {
 				line := strings.ReplaceAll(lines[i], "\r", "")
-				if line == "LOADATSTARTEND" { break }
+				if line == "LOADATSTARTEND" {
+					break
+				}
 				line = guntokenize(line)
 				names := strings.Split(line, "\n")
 				for _, levelName := range names {
@@ -6028,7 +6544,9 @@ func (m *Map) LoadMapLevels() {
 	defer m.mu.RUnlock()
 	if m.loadFullMap {
 		for _, levelName := range m.levelList {
-			if levelName != "" { m.server.GetLevel(levelName) }
+			if levelName != "" {
+				m.server.GetLevel(levelName)
+			}
 		}
 	} else if len(m.preloadLevelList) > 0 {
 		for _, levelName := range m.preloadLevelList {
@@ -6043,12 +6561,24 @@ func guntokenize(s string) string {
 	for i < len(s) {
 		if i+1 < len(s) && s[i] == '\\' {
 			switch s[i+1] {
-			case 'n': result = append(result, '\n'); i += 2
-			case 'r': result = append(result, '\r'); i += 2
-			case 't': result = append(result, '\t'); i += 2
-			case 's': result = append(result, ' '); i += 2
-			case '\\': result = append(result, '\\'); i += 2
-			default: result = append(result, s[i]); i++
+			case 'n':
+				result = append(result, '\n')
+				i += 2
+			case 'r':
+				result = append(result, '\r')
+				i += 2
+			case 't':
+				result = append(result, '\t')
+				i += 2
+			case 's':
+				result = append(result, ' ')
+				i += 2
+			case '\\':
+				result = append(result, '\\')
+				i += 2
+			default:
+				result = append(result, s[i])
+				i++
 			}
 		} else {
 			result = append(result, s[i])
@@ -6067,20 +6597,33 @@ const (
 	PermissionCount
 )
 
-type Permission struct{ flags [PermissionCount]bool; segments []*regexp.Regexp }
+type Permission struct {
+	flags    [PermissionCount]bool
+	segments []*regexp.Regexp
+}
 
-type FilePermissions struct{ mu sync.RWMutex; permissions []Permission; negativePermissions []Permission }
+type FilePermissions struct {
+	mu                  sync.RWMutex
+	permissions         []Permission
+	negativePermissions []Permission
+}
 
-func NewFilePermissions() *FilePermissions { return &FilePermissions{permissions: make([]Permission, 0), negativePermissions: make([]Permission, 0)} }
+func NewFilePermissions() *FilePermissions {
+	return &FilePermissions{permissions: make([]Permission, 0), negativePermissions: make([]Permission, 0)}
+}
 
 func (fp *FilePermissions) HasPermission(path string, permType PermissionType) bool {
 	fp.mu.RLock()
 	defer fp.mu.RUnlock()
 	for _, perm := range fp.negativePermissions {
-		if perm.flags[permType] && fp.match(path, perm) { return false }
+		if perm.flags[permType] && fp.match(path, perm) {
+			return false
+		}
 	}
 	for _, perm := range fp.permissions {
-		if perm.flags[permType] && fp.match(path, perm) { return true }
+		if perm.flags[permType] && fp.match(path, perm) {
+			return true
+		}
 	}
 	return false
 }
@@ -6092,17 +6635,33 @@ func (fp *FilePermissions) AddPermission(permissionString string) {
 	var segments []string
 	idx := 0
 	negative := false
-	if len(permissionString) > 0 && permissionString[0] == '-' { negative = true; idx = 1 }
+	if len(permissionString) > 0 && permissionString[0] == '-' {
+		negative = true
+		idx = 1
+	}
 	for ; idx < len(permissionString); idx++ {
 		ch := permissionString[idx]
-		if ch == 'r' { perm.flags[PermissionRead] = true } else if ch == 'w' { perm.flags[PermissionWrite] = true } else if ch == ' ' { segments = splitInput(permissionString[idx+1:], '/'); break }
+		if ch == 'r' {
+			perm.flags[PermissionRead] = true
+		} else if ch == 'w' {
+			perm.flags[PermissionWrite] = true
+		} else if ch == ' ' {
+			segments = splitInput(permissionString[idx+1:], '/')
+			break
+		}
 	}
 	if len(segments) > 0 {
 		for _, seg := range segments {
 			replaced := strings.ReplaceAll(seg, "*", ".*")
-			if re, err := regexp.Compile("^" + replaced + "$"); err == nil { perm.segments = append(perm.segments, re) }
+			if re, err := regexp.Compile("^" + replaced + "$"); err == nil {
+				perm.segments = append(perm.segments, re)
+			}
 		}
-		if negative { fp.negativePermissions = append(fp.negativePermissions, perm) } else { fp.permissions = append(fp.permissions, perm) }
+		if negative {
+			fp.negativePermissions = append(fp.negativePermissions, perm)
+		} else {
+			fp.permissions = append(fp.permissions, perm)
+		}
 	}
 }
 
@@ -6112,7 +6671,9 @@ func (fp *FilePermissions) LoadPermissions(permissionString string) {
 	fp.permissions = make([]Permission, 0)
 	fp.negativePermissions = make([]Permission, 0)
 	lines := splitInput(permissionString, '\n')
-	for _, line := range lines { fp.addPermissionUnsafe(line) }
+	for _, line := range lines {
+		fp.addPermissionUnsafe(line)
+	}
 }
 
 func (fp *FilePermissions) addPermissionUnsafe(permissionString string) {
@@ -6120,25 +6681,45 @@ func (fp *FilePermissions) addPermissionUnsafe(permissionString string) {
 	var segments []string
 	idx := 0
 	negative := false
-	if len(permissionString) > 0 && permissionString[0] == '-' { negative = true; idx = 1 }
+	if len(permissionString) > 0 && permissionString[0] == '-' {
+		negative = true
+		idx = 1
+	}
 	for ; idx < len(permissionString); idx++ {
 		ch := permissionString[idx]
-		if ch == 'r' { perm.flags[PermissionRead] = true } else if ch == 'w' { perm.flags[PermissionWrite] = true } else if ch == ' ' { segments = splitInput(permissionString[idx+1:], '/'); break }
+		if ch == 'r' {
+			perm.flags[PermissionRead] = true
+		} else if ch == 'w' {
+			perm.flags[PermissionWrite] = true
+		} else if ch == ' ' {
+			segments = splitInput(permissionString[idx+1:], '/')
+			break
+		}
 	}
 	if len(segments) > 0 {
 		for _, seg := range segments {
 			replaced := strings.ReplaceAll(seg, "*", ".*")
-			if re, err := regexp.Compile("^" + replaced + "$"); err == nil { perm.segments = append(perm.segments, re) }
+			if re, err := regexp.Compile("^" + replaced + "$"); err == nil {
+				perm.segments = append(perm.segments, re)
+			}
 		}
-		if negative { fp.negativePermissions = append(fp.negativePermissions, perm) } else { fp.permissions = append(fp.permissions, perm) }
+		if negative {
+			fp.negativePermissions = append(fp.negativePermissions, perm)
+		} else {
+			fp.permissions = append(fp.permissions, perm)
+		}
 	}
 }
 
 func (fp *FilePermissions) match(path string, perm Permission) bool {
 	segments := splitInput(path, '/')
-	if len(segments) == 0 || len(segments) != len(perm.segments) { return false }
+	if len(segments) == 0 || len(segments) != len(perm.segments) {
+		return false
+	}
 	for i := 0; i < len(segments); i++ {
-		if !perm.segments[i].MatchString(segments[i]) { return false }
+		if !perm.segments[i].MatchString(segments[i]) {
+			return false
+		}
 	}
 	return true
 }
@@ -6147,25 +6728,30 @@ func splitInput(input string, delimiter byte) []string {
 	var lines []string
 	start := 0
 	for i := 0; i < len(input); i++ {
-		if input[i] == delimiter { lines = append(lines, input[start:i]); start = i + 1 }
+		if input[i] == delimiter {
+			lines = append(lines, input[start:i])
+			start = i + 1
+		}
 	}
-	if start < len(input) { lines = append(lines, input[start:]) }
+	if start < len(input) {
+		lines = append(lines, input[start:])
+	}
 	return lines
 }
 
 // ============ SERVER LIST ============
 type ServerList struct {
-	server                  *Server
-	conn                    net.Conn
-	connected               bool
-	sendQueue               chan []byte
-	enabled                 bool
-	description             string
-	nextConnectionAttempt   time.Time
-	connectionAttempts      int
-	lastTimer               time.Time
-	codec                   uint32
-	readBuffer              []byte
+	server                *Server
+	conn                  net.Conn
+	connected             bool
+	sendQueue             chan []byte
+	enabled               bool
+	description           string
+	nextConnectionAttempt time.Time
+	connectionAttempts    int
+	lastTimer             time.Time
+	codec                 uint32
+	readBuffer            []byte
 }
 
 func NewServerList(s *Server) *ServerList {
@@ -6177,9 +6763,13 @@ func (sl *ServerList) doTimedEvents() {
 	sl.lastTimer = now
 	if !sl.connected && now.After(sl.nextConnectionAttempt) {
 		if !sl.connectServer() {
-			if sl.connectionAttempts < 8 { sl.connectionAttempts++ }
+			if sl.connectionAttempts < 8 {
+				sl.connectionAttempts++
+			}
 			waitTime := time.Duration(1<<uint(sl.connectionAttempts)) * time.Second
-			if waitTime > 300*time.Second { waitTime = 300 * time.Second }
+			if waitTime > 300*time.Second {
+				waitTime = 300 * time.Second
+			}
 			sl.nextConnectionAttempt = now.Add(waitTime)
 		} else {
 			sl.connectionAttempts = 0
@@ -6188,10 +6778,14 @@ func (sl *ServerList) doTimedEvents() {
 }
 
 func (sl *ServerList) connectServer() bool {
-	if sl.connected { return true }
+	if sl.connected {
+		return true
+	}
 	listip := sl.server.settings.Get("listip")
 	listport := sl.server.settings.Get("listport")
-	if listip == "" || listport == "" { return false }
+	if listip == "" || listport == "" {
+		return false
+	}
 	sl.server.logger.Write(":: Initializing listserver socket.")
 	address := net.JoinHostPort(listip, listport)
 	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
@@ -6222,17 +6816,29 @@ func (sl *ServerList) connectServer() bool {
 	// Packet 3: SVO_NEWSERVER
 	buf = NewBuffer()
 	name := sl.server.settings.Get("name")
-	if name == "" { name = sl.server.name }
+	if name == "" {
+		name = sl.server.name
+	}
 	desc := sl.server.settings.Get("description")
-	if desc == "" { desc = sl.server.name }
+	if desc == "" {
+		desc = sl.server.name
+	}
 	language := sl.server.settings.Get("language")
-	if language == "" { language = "English" }
+	if language == "" {
+		language = "English"
+	}
 	url := sl.server.settings.Get("url")
-	if url == "" { url = "http://www.graal.in/" }
+	if url == "" {
+		url = "http://www.graal.in/"
+	}
 	ip := sl.server.settings.Get("serverip")
-	if ip == "" { ip = "AUTO" }
+	if ip == "" {
+		ip = "AUTO"
+	}
 	port := sl.server.settings.Get("serverport")
-	if port == "" { port = "14802" }
+	if port == "" {
+		port = "14802"
+	}
 	localip := sl.server.settings.Get("localip")
 	if localip == "" || localip == "AUTO" {
 		localip = conn.LocalAddr().(*net.TCPAddr).IP.String()
@@ -6252,7 +6858,9 @@ func (sl *ServerList) connectServer() bool {
 	buf.WriteString8Encoded(localip)
 	sl.server.logger.Debug("[LISTSERVER] NEWSERVER packet: name=%d desc=%d lang=%d ver=%d url=%d ip=%d port=%d localip=%d", len(name), len(desc), len(language), len(APP_VERSION), len(url), len(ip), len(port), len(localip))
 	var hexData string
-	for i := 0; i < 30 && i < buf.Len(); i++ { hexData += fmt.Sprintf("%02X ", buf.Bytes()[i]) }
+	for i := 0; i < 30 && i < buf.Len(); i++ {
+		hexData += fmt.Sprintf("%02X ", buf.Bytes()[i])
+	}
 	sl.server.logger.Debug("[LISTSERVER] NEWSERVER data: %s", hexData)
 	sl.sendPacket(buf.Bytes())
 	// Packet 4: SVO_SERVERHQLEVEL
@@ -6302,7 +6910,14 @@ func (sl *ServerList) receiveLoop() {
 		sl.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := sl.conn.Read(buf)
 		if err != nil {
-			if err == io.EOF { sl.server.logger.Debug("[LISTSERVER] Connection closed by listserver") } else if netErr, ok := err.(net.Error); ok && netErr.Timeout() { sl.server.logger.Debug("[LISTSERVER] Read timeout"); continue } else { sl.server.logger.Error("[LISTSERVER] Receive error: %v", err) }
+			if err == io.EOF {
+				sl.server.logger.Debug("[LISTSERVER] Connection closed by listserver")
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				sl.server.logger.Debug("[LISTSERVER] Read timeout")
+				continue
+			} else {
+				sl.server.logger.Error("[LISTSERVER] Receive error: %v", err)
+			}
 			break
 		}
 		sl.server.logger.Debug("[LISTSERVER] Received %d raw bytes", n)
@@ -6326,7 +6941,10 @@ func (sl *ServerList) processListData() {
 		compressed := sl.readBuffer[2 : length+2]
 		// Decompress
 		reader, err := zlib.NewReader(bytes.NewReader(compressed))
-		if err != nil { sl.server.logger.Error("[LISTSERVER] Decompress error: %v", err); break }
+		if err != nil {
+			sl.server.logger.Error("[LISTSERVER] Decompress error: %v", err)
+			break
+		}
 		decompressed, _ := io.ReadAll(reader)
 		reader.Close()
 		sl.server.logger.Debug("[LISTSERVER] Decompressed to %d bytes", len(decompressed))
@@ -6381,7 +6999,9 @@ func (sl *ServerList) handleListPacket(packetId uint8, data []byte) {
 }
 
 func (sl *ServerList) processPacket(data []byte) {
-	if len(data) == 0 { return }
+	if len(data) == 0 {
+		return
+	}
 	packetId := data[0]
 	switch packetId {
 	case SVI_VERIACC, SVI_VERIACC2:
@@ -6410,7 +7030,9 @@ func (sl *ServerList) SendPacket(packet []byte) {
 }
 
 func (sl *ServerList) sendPacket(packet []byte) {
-	if !sl.connected { return }
+	if !sl.connected {
+		return
+	}
 	// Append '\n' if missing
 	if len(packet) > 0 && packet[len(packet)-1] != '\n' {
 		packet = append(packet, '\n')
@@ -6421,8 +7043,15 @@ func (sl *ServerList) sendPacket(packet []byte) {
 		// Raw packet
 		var hexOut string
 		for i, b := range packet {
-			if i == 0 { hexOut += fmt.Sprintf(" [%d] ", b) } else { hexOut += fmt.Sprintf("%02X ", b) }
-			if i > 20 { hexOut += "..."; break }
+			if i == 0 {
+				hexOut += fmt.Sprintf(" [%d] ", b)
+			} else {
+				hexOut += fmt.Sprintf("%02X ", b)
+			}
+			if i > 20 {
+				hexOut += "..."
+				break
+			}
 		}
 		sl.server.logger.Debug("[LISTSERVER] GEN_1 Sending %d bytes: %s", len(packet), hexOut)
 		sl.sendQueue <- packet
@@ -6439,8 +7068,15 @@ func (sl *ServerList) sendPacket(packet []byte) {
 		finalPacket := data.Bytes()
 		var hexOut string
 		for i, b := range finalPacket {
-			if i == 0 { hexOut += fmt.Sprintf(" [%02X] ", b) } else { hexOut += fmt.Sprintf("%02X ", b) }
-			if i > 20 { hexOut += "..."; break }
+			if i == 0 {
+				hexOut += fmt.Sprintf(" [%02X] ", b)
+			} else {
+				hexOut += fmt.Sprintf("%02X ", b)
+			}
+			if i > 20 {
+				hexOut += "..."
+				break
+			}
 		}
 		sl.server.logger.Debug("[LISTSERVER] GEN_2 Sending %d bytes (compressed from %d): %s", len(finalPacket), len(packet), hexOut)
 		sl.sendQueue <- finalPacket
@@ -6450,61 +7086,43 @@ func (sl *ServerList) sendPacket(packet []byte) {
 }
 
 func (sl *ServerList) sendPlayers() {
-	if !sl.connected { return }
+	if !sl.connected {
+		return
+	}
 	buf := NewBuffer()
 	buf.WriteGChar(SVO_SETPLYR)
 	sl.sendPacket(buf.Bytes())
 	for _, player := range sl.server.players {
 		if player != nil {
 			sl.server.logger.Debug("[LISTSERVER] Sending player to listserver: id=%d type=%d account=%s nickname=%s level=%s x=%d y=%d", player.id, player.playerType, player.accountName, player.character.nickName, player.levelName, int(player.x), int(player.y))
-			buf = NewBuffer()
-			buf.WriteGChar(SVO_PLYRADD)
-			buf.WriteGShort(uint16(player.id))
-			buf.WriteGChar(byte(player.playerType))
-			buf.WriteGChar(PLPROP_ACCOUNTNAME).WriteString8Encoded(player.accountName)
-			nickLen := len(player.character.nickName)
-			sl.server.logger.Info("[LISTSERVER] Nickname: len=%d g_encoded=%d raw=%q", nickLen, nickLen+32, player.character.nickName)
-			sl.server.logger.Info("[LISTSERVER] Buffer before nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
-			buf.WriteGChar(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
-			sl.server.logger.Info("[LISTSERVER] Buffer after nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
-			buf.WriteGChar(PLPROP_CURLEVEL).WriteGChar(1).WriteByte(' ')
-			buf.WriteGChar(PLPROP_X).WriteGChar(byte(player.x / 8))
-			buf.WriteGChar(PLPROP_Y).WriteGChar(byte(player.y / 8))
-			buf.WriteGChar(PLPROP_ALIGNMENT).WriteGChar(byte(player.alignment))
-			buf.WriteGChar(PLPROP_IPADDR).WriteGString(player.accountIpStr)
-			packetBytes := buf.Bytes()
-			var hexStr string
-			for _, b := range packetBytes {
-				hexStr += fmt.Sprintf("%02X ", b)
-			}
-			sl.server.logger.Info("[LISTSERVER] PLYRADD packet (%d bytes): %s", len(packetBytes), hexStr)
-			sl.sendPacket(packetBytes)
+			sl.sendPlayerAdd(player)
 		}
 	}
 }
 func (sl *ServerList) AddPlayer(player *Player) {
-	if !sl.connected { return }
+	if !sl.connected {
+		return
+	}
+	sl.sendPlayerAdd(player)
+}
+
+func (sl *ServerList) sendPlayerAdd(player *Player) {
 	buf := NewBuffer()
 	buf.WriteGChar(SVO_PLYRADD)
 	buf.WriteGShort(uint16(player.id))
 	buf.WriteGChar(byte(player.playerType))
-	buf.WriteGChar(PLPROP_ACCOUNTNAME).WriteString8Encoded(player.accountName)
-	nickLen := len(player.character.nickName)
-	sl.server.logger.Info("[LISTSERVER] Nickname: len=%d g_encoded_len=%d raw=%q bytes=%d", nickLen, nickLen+32, player.character.nickName, len(player.character.nickName))
-	sl.server.logger.Info("[LISTSERVER] Buffer before nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
-	buf.WriteGChar(PLPROP_NICKNAME).WriteString8Encoded(player.character.nickName)
-	sl.server.logger.Info("[LISTSERVER] Buffer after nickname (%d bytes): %v", len(buf.Bytes()), buf.Bytes())
-	buf.WriteGChar(PLPROP_CURLEVEL).WriteString8Encoded(player.levelName)
-	buf.WriteGChar(PLPROP_X).WriteGChar(byte(player.x / 8))
-	buf.WriteGChar(PLPROP_Y).WriteGChar(byte(player.y / 8))
-	buf.WriteGChar(PLPROP_ALIGNMENT).WriteGChar(byte(player.alignment))
-	buf.WriteGChar(PLPROP_IPADDR).WriteGString(player.accountIpStr)
+	for _, propId := range []int{PLPROP_ACCOUNTNAME, PLPROP_NICKNAME, PLPROP_CURLEVEL, PLPROP_X, PLPROP_Y, PLPROP_ALIGNMENT, PLPROP_IPADDR} {
+		buf.WriteGChar(byte(propId))
+		buf.Write(player.getProp(propId))
+	}
 	packetBytes := buf.Bytes()
 	sl.server.logger.Info("[LISTSERVER] PLYRADD packet (%d bytes): %v", len(packetBytes), packetBytes)
-	sl.SendPacket(packetBytes)
+	sl.sendPacket(packetBytes)
 }
 func (sl *ServerList) DeletePlayer(player *Player) {
-	if !sl.connected { return }
+	if !sl.connected {
+		return
+	}
 	buf := NewBuffer()
 	buf.WriteGChar(SVO_PLYRREM).WriteGShort(uint16(player.id))
 	sl.SendPacket(buf.Bytes())
@@ -6572,12 +7190,26 @@ type UpdatePackage struct {
 	mu          sync.RWMutex
 }
 
-func NewUpdatePackage(packageName string) *UpdatePackage { return &UpdatePackage{packageName: packageName, fileList: make(map[string]UpdatePackageFileEntry)} }
+func NewUpdatePackage(packageName string) *UpdatePackage {
+	return &UpdatePackage{packageName: packageName, fileList: make(map[string]UpdatePackageFileEntry)}
+}
 
 func (up *UpdatePackage) GetPackageName() string { return up.packageName }
-func (up *UpdatePackage) GetPackageSize() uint32 { up.mu.RLock(); defer up.mu.RUnlock(); return up.packageSize }
-func (up *UpdatePackage) GetFileList() map[string]UpdatePackageFileEntry { up.mu.RLock(); defer up.mu.RUnlock(); return up.fileList }
-func (up *UpdatePackage) CompareChecksum(check uint32) bool { up.mu.RLock(); defer up.mu.RUnlock(); return up.checksum == check }
+func (up *UpdatePackage) GetPackageSize() uint32 {
+	up.mu.RLock()
+	defer up.mu.RUnlock()
+	return up.packageSize
+}
+func (up *UpdatePackage) GetFileList() map[string]UpdatePackageFileEntry {
+	up.mu.RLock()
+	defer up.mu.RUnlock()
+	return up.fileList
+}
+func (up *UpdatePackage) CompareChecksum(check uint32) bool {
+	up.mu.RLock()
+	defer up.mu.RUnlock()
+	return up.checksum == check
+}
 
 func (up *UpdatePackage) Reload(server *Server) {
 	up.mu.Lock()
@@ -6586,7 +7218,9 @@ func (up *UpdatePackage) Reload(server *Server) {
 	up.packageSize = 0
 	up.fileList = make(map[string]UpdatePackageFileEntry)
 	fileContents, err := server.config.LoadFile(up.packageName)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	up.checksum = calculateCrc32Checksum(fileContents)
 	lines := strings.Split(string(fileContents), "\n")
 	for _, line := range lines {
@@ -6624,13 +7258,18 @@ func toLower(s string) string                   { return strings.ToLower(s) }
 
 func shortsToBytes(shorts []int16) []byte {
 	bytes := make([]byte, len(shorts)*2)
-	for i, s := range shorts { bytes[i*2] = byte(s >> 8); bytes[i*2+1] = byte(s) }
+	for i, s := range shorts {
+		bytes[i*2] = byte(s >> 8)
+		bytes[i*2+1] = byte(s)
+	}
 	return bytes
 }
 
 func bytesToShorts(bytes []byte) []int16 {
 	shorts := make([]int16, len(bytes)/2)
-	for i := 0; i < len(shorts); i++ { shorts[i] = int16(bytes[i*2])<<8 | int16(bytes[i*2+1]) }
+	for i := 0; i < len(shorts); i++ {
+		shorts[i] = int16(bytes[i*2])<<8 | int16(bytes[i*2+1])
+	}
 	return shorts
 }
 
@@ -6714,7 +7353,9 @@ func (p *Player) updatePMPlayers(serverName string, playersData string) {
 		if extPlayer.serverName == serverName {
 			found := false
 			for _, playerLine := range playersList {
-				if playerLine == "" { continue }
+				if playerLine == "" {
+					continue
+				}
 				parts := strings.SplitN(strings.ReplaceAll(playerLine, "\x01", "\n"), "\n", 2)
 				if len(parts) >= 2 {
 					account := parts[0]
@@ -6736,9 +7377,13 @@ func (p *Player) updatePMPlayers(serverName string, playersData string) {
 		}
 	}
 	for _, playerLine := range playersList {
-		if playerLine == "" { continue }
+		if playerLine == "" {
+			continue
+		}
 		parts := strings.SplitN(strings.ReplaceAll(playerLine, "\x01", "\n"), "\n", 2)
-		if len(parts) < 2 { continue }
+		if len(parts) < 2 {
+			continue
+		}
 		account := parts[0]
 		nick := parts[1]
 		found := false
@@ -6835,21 +7480,21 @@ const (
 )
 
 type WordFilterRule struct {
-	check                 int
-	wordPosition          int
-	action                int
-	precision             int
-	precisionPercentage   bool
-	match                 string
-	warnMessage           string
+	check               int
+	wordPosition        int
+	action              int
+	precision           int
+	precisionPercentage bool
+	match               string
+	warnMessage         string
 }
 
 type WordFilter struct {
-	server               *Server
-	mu                   sync.RWMutex
-	showWordsToRC        bool
-	defaultWarnMessage   string
-	rules                []WordFilterRule
+	server             *Server
+	mu                 sync.RWMutex
+	showWordsToRC      bool
+	defaultWarnMessage string
+	rules              []WordFilterRule
 }
 
 func wfIsUpper(c byte) bool { return c >= 65 && c <= 90 }
@@ -6857,7 +7502,9 @@ func wfIsUpper(c byte) bool { return c >= 65 && c <= 90 }
 func wfIsLower(c byte) bool { return c >= 97 && c <= 122 }
 
 func wfToLower(c byte) byte {
-	if c >= 65 && c <= 90 { return c + 32 }
+	if c >= 65 && c <= 90 {
+		return c + 32
+	}
 	return c
 }
 
@@ -6866,13 +7513,19 @@ func (wf *WordFilter) load(fileName string) {
 	defer wf.mu.Unlock()
 	wf.rules = nil
 	lines, err := wf.server.config.LoadFileAsLines(fileName)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 		parts := strings.Fields(line)
-		if len(parts) == 0 { continue }
+		if len(parts) == 0 {
+			continue
+		}
 
 		if parts[0] == "RULE" {
 			rule := WordFilterRule{precision: 100, precisionPercentage: true}
@@ -6880,64 +7533,97 @@ func (wf *WordFilter) load(fileName string) {
 			for i < len(lines) && strings.TrimSpace(lines[i]) != "RULEEND" {
 				line2 := strings.TrimSpace(lines[i])
 				parts2 := strings.Fields(line2)
-				if len(parts2) == 0 { i++; continue }
+				if len(parts2) == 0 {
+					i++
+					continue
+				}
 
 				switch parts2[0] {
 				case "CHECK":
 					for j := 1; j < len(parts2); j++ {
 						switch parts2[j] {
-						case "chat": rule.check |= FILTER_CHECK_CHAT
-						case "pm": rule.check |= FILTER_CHECK_PM
-						case "nick": rule.check |= FILTER_CHECK_NICK
-						case "toall": rule.check |= FILTER_CHECK_TOALL
+						case "chat":
+							rule.check |= FILTER_CHECK_CHAT
+						case "pm":
+							rule.check |= FILTER_CHECK_PM
+						case "nick":
+							rule.check |= FILTER_CHECK_NICK
+						case "toall":
+							rule.check |= FILTER_CHECK_TOALL
 						}
 					}
 				case "MATCH":
-					if len(parts2) == 2 { rule.match = parts2[1] }
+					if len(parts2) == 2 {
+						rule.match = parts2[1]
+					}
 				case "PRECISION":
 					if len(parts2) == 2 {
 						if strings.Contains(parts2[1], "%") {
 							rule.precisionPercentage = true
 							parts2[1] = strings.TrimSuffix(parts2[1], "%")
-						} else { rule.precisionPercentage = false }
-						if val, err := strconv.Atoi(parts2[1]); err == nil { rule.precision = val }
+						} else {
+							rule.precisionPercentage = false
+						}
+						if val, err := strconv.Atoi(parts2[1]); err == nil {
+							rule.precision = val
+						}
 					}
 				case "WORDPOSITION":
 					for j := 1; j < len(parts2); j++ {
 						switch parts2[j] {
-						case "full": rule.wordPosition |= FILTER_POSITION_FULL
-						case "start": rule.wordPosition |= FILTER_POSITION_START
-						case "part": rule.wordPosition |= FILTER_POSITION_PART
+						case "full":
+							rule.wordPosition |= FILTER_POSITION_FULL
+						case "start":
+							rule.wordPosition |= FILTER_POSITION_START
+						case "part":
+							rule.wordPosition |= FILTER_POSITION_PART
 						}
 					}
 				case "ACTION":
 					for j := 1; j < len(parts2); j++ {
 						switch parts2[j] {
-						case "log": rule.action |= FILTER_ACTION_LOG
-						case "tellrc": rule.action |= FILTER_ACTION_TELLRC
-						case "replace": rule.action |= FILTER_ACTION_REPLACE
-						case "warn": rule.action |= FILTER_ACTION_WARN
-						case "jail": rule.action |= FILTER_ACTION_JAIL
-						case "ban": rule.action |= FILTER_ACTION_BAN
+						case "log":
+							rule.action |= FILTER_ACTION_LOG
+						case "tellrc":
+							rule.action |= FILTER_ACTION_TELLRC
+						case "replace":
+							rule.action |= FILTER_ACTION_REPLACE
+						case "warn":
+							rule.action |= FILTER_ACTION_WARN
+						case "jail":
+							rule.action |= FILTER_ACTION_JAIL
+						case "ban":
+							rule.action |= FILTER_ACTION_BAN
 						}
 					}
 				case "WARNMESSAGE":
-					if len(line2) > 12 { rule.warnMessage = strings.TrimSpace(line2[12:]) }
+					if len(line2) > 12 {
+						rule.warnMessage = strings.TrimSpace(line2[12:])
+					}
 				}
 				i++
 			}
-			if rule.check != 0 && rule.action != 0 && rule.wordPosition != 0 { wf.rules = append(wf.rules, rule) }
+			if rule.check != 0 && rule.action != 0 && rule.wordPosition != 0 {
+				wf.rules = append(wf.rules, rule)
+			}
 		} else if parts[0] == "WARNMESSAGE" {
-			if len(line) > 12 { wf.defaultWarnMessage = strings.TrimSpace(line[12:]) }
+			if len(line) > 12 {
+				wf.defaultWarnMessage = strings.TrimSpace(line[12:])
+			}
 		} else if parts[0] == "SHOWWORDSTORC" {
-			if len(parts) == 2 && parts[1] == "true" { wf.showWordsToRC = true }
+			if len(parts) == 2 && parts[1] == "true" {
+				wf.showWordsToRC = true
+			}
 		}
 	}
 }
 
 func (wf *WordFilter) apply(player *Player, chat string, check int) string {
 	wf.mu.RLock()
-	if len(chat) == 0 || len(wf.rules) == 0 || check == 0 { wf.mu.RUnlock(); return chat }
+	if len(chat) == 0 || len(wf.rules) == 0 || check == 0 {
+		wf.mu.RUnlock()
+		return chat
+	}
 	wf.mu.RUnlock()
 
 	out := chat
@@ -6947,11 +7633,15 @@ func (wf *WordFilter) apply(player *Player, chat string, check int) string {
 	actionsFound := 0
 
 	for _, rule := range wf.rules {
-		if check&rule.check == 0 { continue }
+		if check&rule.check == 0 {
+			continue
+		}
 
 		if rule.wordPosition != FILTER_POSITION_PART {
 			for _, word := range chatWords {
-				if rule.wordPosition == FILTER_POSITION_FULL && len(word) != len(rule.match) { continue }
+				if rule.wordPosition == FILTER_POSITION_FULL && len(word) != len(rule.match) {
+					continue
+				}
 
 				wordsMatched := 0
 				failed := false
@@ -6965,13 +7655,24 @@ func (wf *WordFilter) apply(player *Player, chat string, check int) string {
 					if wfIsLower(byte(letter)) && byte(letter) == wfToLower(wordLetter) {
 						wordsMatched++
 					} else if wfIsUpper(byte(letter)) {
-						if wfToLower(byte(letter)) == wfToLower(wordLetter) { wordsMatched++ } else { failed = true; break }
+						if wfToLower(byte(letter)) == wfToLower(wordLetter) {
+							wordsMatched++
+						} else {
+							failed = true
+							break
+						}
 					}
 				}
-				if failed { continue }
+				if failed {
+					continue
+				}
 
-				if !rule.precisionPercentage && wordsMatched < rule.precision { continue }
-				if rule.precisionPercentage && rule.precision > int((float64(wordsMatched)/float64(len(rule.match)))*100) { continue }
+				if !rule.precisionPercentage && wordsMatched < rule.precision {
+					continue
+				}
+				if rule.precisionPercentage && rule.precision > int((float64(wordsMatched)/float64(len(rule.match)))*100) {
+					continue
+				}
 
 				wordsFound = append(wordsFound, word)
 				actionsFound |= rule.action
@@ -6996,13 +7697,21 @@ func (wf *WordFilter) apply(player *Player, chat string, check int) string {
 				for chatpos := 0; chatpos < len(rule.match) && wordpos+chatpos < len(chat); chatpos++ {
 					if wordpos+chatpos == wordStart {
 						for _, b := range bypass {
-							if chat[wordpos+chatpos] == b { failed = true; break }
+							if chat[wordpos+chatpos] == b {
+								failed = true
+								break
+							}
 						}
-						if failed { break }
+						if failed {
+							break
+						}
 					}
 
 					for _, b := range bypass {
-						if chat[wordpos+chatpos] == b { word.WriteByte(b); wordpos++ }
+						if chat[wordpos+chatpos] == b {
+							word.WriteByte(b)
+							wordpos++
+						}
 					}
 
 					letter := rule.match[chatpos]
@@ -7015,15 +7724,26 @@ func (wf *WordFilter) apply(player *Player, chat string, check int) string {
 					if wfIsLower(byte(letter)) && byte(letter) == wfToLower(wordLetter) {
 						wordsMatched++
 					} else if wfIsUpper(byte(letter)) {
-						if wfToLower(byte(letter)) == wfToLower(wordLetter) { wordsMatched++ } else { failed = true; break }
+						if wfToLower(byte(letter)) == wfToLower(wordLetter) {
+							wordsMatched++
+						} else {
+							failed = true
+							break
+						}
 					}
 					word.WriteByte(wordLetter)
 				}
 				wordpos = wordStart
-				if failed { continue }
+				if failed {
+					continue
+				}
 
-				if !rule.precisionPercentage && wordsMatched < rule.precision { continue }
-				if rule.precisionPercentage && rule.precision > int((float64(wordsMatched)/float64(len(rule.match)))*100) { continue }
+				if !rule.precisionPercentage && wordsMatched < rule.precision {
+					continue
+				}
+				if rule.precisionPercentage && rule.precision > int((float64(wordsMatched)/float64(len(rule.match)))*100) {
+					continue
+				}
 
 				trimmedWord := strings.TrimSpace(word.String())
 				wordsFound = append(wordsFound, trimmedWord)
@@ -7043,7 +7763,9 @@ func (wf *WordFilter) apply(player *Player, chat string, check int) string {
 	}
 
 WordFilterActions:
-	if len(wordsFound) == 0 { return chat }
+	if len(wordsFound) == 0 {
+		return chat
+	}
 
 	badwords := strings.Join(wordsFound, ", ")
 
@@ -7059,7 +7781,9 @@ WordFilterActions:
 	}
 
 	if actionsFound&FILTER_ACTION_WARN != 0 {
-		if warnMessage == "" { return wf.defaultWarnMessage }
+		if warnMessage == "" {
+			return wf.defaultWarnMessage
+		}
 		return warnMessage
 	}
 

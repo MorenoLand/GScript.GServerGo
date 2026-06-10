@@ -148,7 +148,7 @@ minimap =
 # --- Private server options.  The changestaffacct right is required to alter these. ---
 # --------------------------------------------------------------------------------------
 # The server details seen from the server list.
-name = Orion
+name = Orion-Go
 description = Go Code GServer
 url = https://github.com/Denveous/gserver-go
 
