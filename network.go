@@ -247,45 +247,22 @@ func (b *Buffer) ReadInt3() int32 {
 func (b *Buffer) ReadGByte() uint8 { return uint8(b.ReadByte()) }
 
 func (b *Buffer) ReadGShort() uint16 {
-	if b.read >= len(b.data) {
+	if b.read+2 > len(b.data) {
 		return 0
 	}
-	first := b.data[b.read]
-	b.read++
-	if first&0x80 == 0 {
-		return uint16(first)
-	}
-	if b.read >= len(b.data) {
-		return 0
-	}
-	second := b.data[b.read]
-	b.read++
-	return uint16(first&0x7F)<<8 | uint16(second)
+	first := uint16(b.ReadGChar())
+	second := uint16(b.ReadGChar())
+	return (first << 7) | second
 }
 
 func (b *Buffer) ReadGInt() uint32 {
-	if b.read >= len(b.data) {
+	if b.read+3 > len(b.data) {
 		return 0
 	}
-	first := b.data[b.read]
-	b.read++
-	if first&0x80 == 0 {
-		return uint32(first)
-	}
-	if b.read >= len(b.data) {
-		return 0
-	}
-	second := b.data[b.read]
-	b.read++
-	if second&0x80 == 0 {
-		return uint32(first&0x7F)<<8 | uint32(second)
-	}
-	if b.read >= len(b.data) {
-		return 0
-	}
-	third := b.data[b.read]
-	b.read++
-	return uint32(first&0x7F)<<16 | uint32(second)<<8 | uint32(third)
+	first := uint32(b.ReadGChar())
+	second := uint32(b.ReadGChar())
+	third := uint32(b.ReadGChar())
+	return (first << 14) | (second << 7) | third
 }
 
 func (b *Buffer) ReadGInt4() uint32 {
@@ -305,9 +282,12 @@ func (b *Buffer) ReadGInt5() uint64 {
 	if b.read+5 > len(b.data) {
 		return 0
 	}
-	v := uint64(b.data[b.read])<<32 | uint64(b.data[b.read+1])<<24 | uint64(b.data[b.read+2])<<16 | uint64(b.data[b.read+3])<<8 | uint64(b.data[b.read+4])
-	b.read += 5
-	return v
+	first := uint64(b.ReadGChar())
+	second := uint64(b.ReadGChar())
+	third := uint64(b.ReadGChar())
+	fourth := uint64(b.ReadGChar())
+	fifth := uint64(b.ReadGChar())
+	return (first << 28) | (second << 21) | (third << 14) | (fourth << 7) | fifth
 }
 
 func (b *Buffer) ReadGString() string {
@@ -318,6 +298,14 @@ func (b *Buffer) ReadGString() string {
 	start := b.read
 	b.read += int(strLen)
 	return string(b.data[start:b.read])
+}
+
+func (b *Buffer) ReadGCharString() string {
+	strLen := int(b.ReadGChar())
+	if strLen > b.BytesLeft() {
+		strLen = b.BytesLeft()
+	}
+	return string(b.ReadBytes(strLen))
 }
 
 func (b *Buffer) ReadString() string {
