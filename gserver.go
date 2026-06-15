@@ -237,11 +237,10 @@ func (s *Server) oneSecondEvents() {
 		}
 	}
 	s.npcMu.Unlock()
-	s.playerMu.RLock()
-	for _, player := range s.players {
+	players := s.GetAllPlayers()
+	for _, player := range players {
 		player.processTimeout()
 	}
-	s.playerMu.RUnlock()
 }
 
 func (s *Server) oneMinuteEvents() { s.logger.Debug("One minute timer") }
@@ -502,6 +501,9 @@ func (s *Server) DeletePlayer(player *Player) {
 	s.playerMu.Unlock()
 	if !existed {
 		return
+	}
+	if s.serverList != nil {
+		s.serverList.DeletePlayer(player)
 	}
 	for _, other := range remaining {
 		if other != nil && other.conn != nil && other.isLoggedIn() && other.playerType&PLTYPE_ANYCLIENT != 0 {
@@ -1193,6 +1195,7 @@ type Player struct {
 	rawPacketSize                                                             int
 	isFtp                                                                     bool
 	grMovementUpdated                                                         bool
+	disconnected                                                              bool
 	firstLevel                                                                bool
 	grMovementPackets                                                         string
 	npcserverPort                                                             string
@@ -2142,11 +2145,27 @@ func (p *Player) send(buf *Buffer) {
 	p.sendPacket(data)
 }
 func (p *Player) disconnect() {
-	if p.conn != nil {
-		p.conn.Close()
+	p.mu.Lock()
+	if p.disconnected {
+		p.mu.Unlock()
+		return
 	}
-	if p.server != nil {
-		p.server.DeletePlayer(p)
+	p.disconnected = true
+	conn := p.conn
+	p.conn = nil
+	level := p.currentLevel
+	p.currentLevel = nil
+	server := p.server
+	p.mu.Unlock()
+
+	if conn != nil {
+		conn.Close()
+	}
+	if level != nil {
+		level.removePlayer(p)
+	}
+	if server != nil {
+		server.DeletePlayer(p)
 	}
 }
 func (p *Player) hasRight(perm int) bool { return p.adminRights&perm != 0 }
@@ -2733,7 +2752,11 @@ func (p *Player) sendPLO_RPGWINDOW(message string) bool {
 	return true
 }
 
-func (p *Player) warp(levelName string, x float64, y float64) {
+func (p *Player) warp(levelName string, x float64, y float64, clientModTime ...int64) {
+	modTime := int64(0)
+	if len(clientModTime) > 0 {
+		modTime = clientModTime[0]
+	}
 	cleanLevelName := cleanLevelName(levelName)
 	level := p.server.loadLevel(cleanLevelName)
 	if level == nil {
@@ -2771,7 +2794,7 @@ func (p *Player) warp(levelName string, x float64, y float64) {
 	p.levelName = levelName
 	level.addPlayer(p)
 	p.sendPLO_PLAYERWARP(p.x, p.y, p.z, levelName)
-	p.sendLevelData(level, levelName, 0, false, true)
+	p.sendLevelData(level, levelName, modTime, false, modTime == 0)
 	p.loaded = true
 	p.server.logger.Debug("warp: Player %s warped to %s at (%.0f, %.0f)", p.accountName, levelName, x, y)
 }
@@ -2863,15 +2886,13 @@ func (p *Player) setGroup(group string) { p.levelGroup = group }
 
 func (p *Player) msgPLI_LEVELWARP(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
+	modTime := int64(0)
 	if packet[0] == PLI_LEVELWARPMOD {
-		_ = buf.ReadGInt5()
+		modTime = int64(buf.ReadGInt5())
 	}
 	x, y := float32(buf.ReadGChar())/2, float32(buf.ReadGChar())/2
 	levelName := string(buf.ReadBytes(buf.BytesLeft()))
-	p.levelName = levelName
-	p.setX(x)
-	p.setY(y)
-	p.sendPLO_PLAYERWARP(p.x, p.y, p.z, levelName)
+	p.warp(levelName, float64(x), float64(y), modTime)
 	return true
 }
 func (p *Player) msgPLI_BOARDMODIFY(packet []byte) bool {

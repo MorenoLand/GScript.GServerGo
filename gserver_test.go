@@ -290,6 +290,44 @@ func TestDeletePlayerBroadcastsDelPlayer(t *testing.T) {
 	}
 }
 
+func TestOneSecondEventsDisconnectsStalePlayersWithoutDeadlock(t *testing.T) {
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
+	level := NewLevel()
+	p := &Player{
+		id:           2,
+		server:       server,
+		playerType:   PLTYPE_CLIENT3,
+		currentLevel: level,
+		lastData:     time.Now().Add(-6 * time.Minute),
+	}
+	level.addPlayer(p)
+	server.players[p.id] = p
+
+	done := make(chan struct{})
+	go func() {
+		server.oneSecondEvents()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("oneSecondEvents deadlocked while disconnecting stale player")
+	}
+
+	if got := server.GetPlayer(p.id); got != nil {
+		t.Fatalf("stale player still registered after timeout: %#v", got)
+	}
+	for _, pid := range level.getPlayers() {
+		if pid == p.id {
+			t.Fatalf("stale player id %d still present in level players", p.id)
+		}
+	}
+}
+
 func TestOtherPropsPacketUsesOtherPlayerPropsHeader(t *testing.T) {
 	p := &Player{id: 0x1234}
 	props := []byte{byte(PLPROP_NICKNAME + 32), byte(len("moondeath") + 32)}
@@ -510,14 +548,19 @@ func TestPlayerWarpUsesClientWireFormat(t *testing.T) {
 }
 
 func TestLevelWarpParsesRestOfPacketAsLevelName(t *testing.T) {
-	serverConn, clientConn := net.Pipe()
-	defer serverConn.Close()
-	defer clientConn.Close()
-
+	level := NewLevel()
+	level.tiles[0] = &LevelTiles{width: 64, height: 64, tiles: make([]int16, 4096)}
+	server := &Server{
+		logger:   NewLogger("", false),
+		config:   NewFileSystem("."),
+		settings: NewSettings(),
+		levels:   map[string]*Level{"inside house": level},
+	}
 	p := &Player{
-		conn:       serverConn,
-		server:     &Server{logger: NewLogger("", false)},
-		encryption: *NewEncryption(),
+		id:            2,
+		server:        server,
+		encryption:    *NewEncryption(),
+		queueOutgoing: true,
 	}
 	p.encryption.SetGen(ENCRYPT_GEN_1)
 
@@ -527,25 +570,26 @@ func TestLevelWarpParsesRestOfPacketAsLevelName(t *testing.T) {
 	packet.WriteGChar(65)
 	packet.Write([]byte("inside house.nw"))
 
-	done := make(chan struct{}, 1)
-	go func() {
-		p.msgPLI_LEVELWARP(packet.Bytes())
-		done <- struct{}{}
-	}()
-
 	want := append([]byte{PLO_PLAYERWARP + 32, 64 + 32, 65 + 32}, []byte("inside house.nw\n")...)
-	clientConn.SetReadDeadline(time.Now().Add(time.Second))
-	got := make([]byte, len(want))
-	if _, err := io.ReadFull(clientConn, got); err != nil {
-		t.Fatalf("read level warp response: %v", err)
+	if !p.msgPLI_LEVELWARP(packet.Bytes()) {
+		t.Fatalf("msgPLI_LEVELWARP returned false")
 	}
-	<-done
 
-	if string(got) != string(want) {
-		t.Fatalf("level warp response = % X, want % X", got, want)
+	if !bytes.HasPrefix(p.outQueue, want) {
+		t.Fatalf("level warp response prefix = % X, want % X", p.outQueue[:minInt(len(p.outQueue), len(want))], want)
+	}
+	levelNamePacket := append([]byte{PLO_LEVELNAME + 32}, []byte("inside house.nw\n")...)
+	if !bytes.Contains(p.outQueue, levelNamePacket) {
+		t.Fatalf("level warp did not send level data after warp: % X", p.outQueue[:minInt(len(p.outQueue), 64)])
+	}
+	if !bytes.Contains(p.outQueue, []byte{PLO_RAWDATA + 32}) {
+		t.Fatalf("level warp did not send raw board data")
 	}
 	if p.levelName != "inside house.nw" {
 		t.Fatalf("levelName = %q, want inside house.nw", p.levelName)
+	}
+	if !p.loaded {
+		t.Fatalf("player was not marked loaded after level warp")
 	}
 }
 

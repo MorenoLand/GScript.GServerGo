@@ -23,11 +23,11 @@ GServer-Go is a complete Go implementation of the Graal Online game server proto
 
 - **Go** 1.23 or later
 
-### Building the server
+### Running the server
 
 ```bash
 cd gserver-go
-go build -o gserver.exe .
+go run .
 ```
 
 ## Quick Start Instructions
@@ -39,7 +39,7 @@ How-to setup a server:
 3) Open config/serveroptions.txt and edit it to your liking.  Be sure to modify the settings under "Private server options".  Help for what these options do are available on the forums and in the file itself.
 4) Find the line that starts with "staff=" in config/serveroptions.txt.  Replace YOURACCOUNT with your account name.  Anybody who needs RC access must be added to this line with their account names separated by commas.  Additionally, RC users must have their IP range changed to at least *.*.*.* in their account to connect.
 5) Port forward if needed. (Many threads on this topic exist in the forums.  If you are having trouble, seek them out.  Try the tutorials forum.)  Basically, if you are behind a router and your computer isn't set to be the "DMZ", you will need to port forward.
-6) Run gserver.exe -- enjoy.
+6) Run `go run .` -- enjoy.
 7) Report any bugs on the Graal forums or GitHub issues.
 
 ## Implementation Status
@@ -100,7 +100,25 @@ How-to setup a server:
 
 ## Testing Status
 
-**Last Updated:** 2026-01-19
+**Current Live Status (2026-06-15):**
+
+Tested with the legacy 2.22 client:
+
+- Login reaches the game world after the GEN_5 outbound frame fix.
+- Listserver registration shows NPCServer and connected clients.
+- Multiple local clients can see each other join/leave.
+- Movement, chat, player prop changes, and dropped rupees replicate to the other client.
+- Death/respawn level reload now routes through `warp()` so the client receives the full level data stream.
+- Long-idle timeout cleanup no longer attempts to promote `playerMu.RLock()` into `playerMu.Lock()`.
+
+Still needs broader live testing:
+
+- Combat/death edge cases beyond the basic respawn reload path.
+- Long idle soak testing after the timeout cleanup fix.
+- RC/NC protocol behavior with real RC/NC clients.
+- Server-side NPC/weapon scripting, which remains blocked on the missing server-side GS2/V8 runtime.
+
+**Last Updated:** 2026-06-15
 
 ### Verified Working ✅
 
@@ -344,6 +362,16 @@ The gserver will load weapon_bytecode/name_of_file and use the bytecode containe
 
 ## Recent Development
 
+### 2026-06-15
+
+**Legacy Client Login and Multiplayer Sync**
+- Fixed GEN_5 outbound frame length endian/size handling; legacy 2.22 clients can reach the game world.
+- Added local RequestText fallbacks needed during login for list/process/package/server text requests.
+- Added PLO_ADDPLAYER/PLO_DELPLAYER exchange and PLO_OTHERPLPROPS forwarding for player props, movement, nick/chat/gani/body/head/style changes.
+- Fixed account health parsing for decimal GRACC001 values such as `MAXHP 3.00` and `HP 3.00`.
+- Fixed PLI_LEVELWARP/PLI_LEVELWARPMOD to call `warp()` so death/respawn reloads send the full level data stream.
+- Fixed stale idle cleanup by avoiding playerMu lock promotion during timeout disconnects and removing disconnected players from level/listserver state.
+
 ### 2026-01-28
 
 **Dual Encryption Codec System Implementation**
@@ -400,29 +428,27 @@ All fixes based on direct C++ source analysis in SESSION01/GServer-v2.
 
 ## Known Issues
 
-**CRITICAL - Login Encryption (2026-01-28)**
-- Client v2.22 gets stuck at "loading account..."
-- Dual encryption codec system implemented but decryption produces garbage
-- Input/output codecs initialize correctly but client packets don't decrypt properly
-- **Investigation in progress** - See progress.md "WHERE TO CONTINUE FROM" section for details
+Current known issues:
 
-- ~~Client may hang at "Loading account..."~~ - FIXED (2026-01-19), REGRESSED (2026-01-28)
+- Server-side GS2/V8 scripting is still missing, so NPC/weapon/server-script behavior is incomplete.
+- Combat, death, and respawn now reach the level reload path, but full gameplay rules still need broader client testing.
+- RC/NC packet handlers exist but still need verification with real RC/NC clients.
+- File upload/download behavior needs more work and live testing.
+- Long idle sessions should no longer deadlock server cleanup, but still need longer soak testing.
+
+- ~~Client may hang at "Loading account..."~~ - FIXED (2026-06-15 for tested v2.22 login path)
 - ~~NPCServer data corruption on listserver~~ - FIXED (2026-01-19)
 - ~~Server not appearing on public listserver~~ - FIXED (2026-01-19)
-- Level file loading (.nw/.zelda) implemented, needs client testing
-- NPC script integration pending V8
-- Weapon system complete except script execution
-- Some RC packet handlers still need implementation
 
 ## Development Roadmap
 
-1. **Level file parsing** - Implement .nw BOARD token parsing and .zelda RLE decoding
-2. **NPC system** - Complete NPC types and AI behaviors
-3. **Weapon system** - Load weapon files, implement weapon packets
-4. **Server-side GS2 compiler** - Create GS2 compiler that runs on server (V8 integration for execution)
-5. **Server-side scripting** - V8 integration for NPC/weapon scripts (client-side GS2 already works)
-6. **File transfer system** - Upload/download functionality
-7. **Word filter** - Chat filtering system
+1. **Combat/death verification** - Finish testing hurt, death, respawn, item drops, and player state sync.
+2. **NPC system** - Complete NPC runtime behavior and AI/script integration.
+3. **Weapon system** - Complete weapon runtime behavior beyond packet/script loading.
+4. **Server-side GS2 compiler** - Create GS2 compiler/runtime path for server-side scripts.
+5. **Server-side scripting** - V8 or replacement runtime integration for NPC/weapon scripts.
+6. **File transfer system** - Upload/download functionality and real-client verification.
+7. **RC/NC verification** - Test the implemented admin/client tooling packet handlers with real clients.
 
 ## Credits
 
