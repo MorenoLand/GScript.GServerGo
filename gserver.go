@@ -489,11 +489,24 @@ func (s *Server) AddPlayer(player *Player, id uint16) bool {
 
 func (s *Server) DeletePlayer(player *Player) {
 	s.playerMu.Lock()
-	defer s.playerMu.Unlock()
 	id := player.getId()
+	_, existed := s.players[id]
 	if _, exists := s.players[id]; exists {
 		delete(s.players, id)
 		s.logger.Info("Player %d removed", id)
+	}
+	remaining := make([]*Player, 0, len(s.players))
+	for _, other := range s.players {
+		remaining = append(remaining, other)
+	}
+	s.playerMu.Unlock()
+	if !existed {
+		return
+	}
+	for _, other := range remaining {
+		if other != nil && other.conn != nil && other.isLoggedIn() && other.playerType&PLTYPE_ANYCLIENT != 0 {
+			other.sendPLO_DELPLAYER(id)
+		}
 	}
 }
 func (s *Server) removePlayer(player *Player) {
@@ -932,9 +945,9 @@ func (a *Account) LoadAccount(accountName string, ignoreNick bool) bool {
 		case "Z":
 			a.setZ(parseFloat(val))
 		case "MAXHP":
-			a.maxHitpoints = uint8(atoi(val) & 0xFF)
+			a.maxHitpoints = uint8(int(parseFloat(val)) & 0xFF)
 		case "HP":
-			a.character.hitpoints = atoi(val)
+			a.character.hitpoints = int(parseFloat(val))
 		case "RUPEES":
 			a.character.gralats = atoi(val)
 		case "ANI":
@@ -1030,6 +1043,7 @@ func (a *Account) LoadAccount(accountName string, ignoreNick bool) bool {
 			}
 		}
 	}
+	a.normalizeHealth()
 	a.isStaff = a.adminRights > 0
 	if toLower(accountName) == "guest" {
 		a.isLoadOnly = true
@@ -1041,6 +1055,22 @@ func (a *Account) LoadAccount(accountName string, ignoreNick bool) bool {
 	}
 	return true
 }
+
+func (a *Account) normalizeHealth() {
+	if a.maxHitpoints == 0 {
+		a.maxHitpoints = 3
+	}
+	if a.maxHitpoints > 20 {
+		a.maxHitpoints = 20
+	}
+	if a.character.hitpoints <= 0 {
+		a.character.hitpoints = int(a.maxHitpoints)
+	}
+	if a.character.hitpoints > int(a.maxHitpoints) {
+		a.character.hitpoints = int(a.maxHitpoints)
+	}
+}
+
 func (a *Account) SaveAccount() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -1316,16 +1346,22 @@ func (p *Player) sendPostLoginTail() {
 		if !other.isLoggedIn() {
 			continue
 		}
+		if other.playerType&PLTYPE_ANYCLIENT != 0 {
+			other.sendPLO_ADDPLAYER(p)
+		}
+		if p.playerType&PLTYPE_ANYCLIENT != 0 {
+			p.sendPLO_ADDPLAYER(other)
+		}
 		myProps := p.sendPropsWithArray(getLoginProps)
 		if len(myProps) == 0 {
 			continue
 		}
-		other.sendPacket(p.otherPropsPacket(myProps))
+		other.sendPacket(append(p.otherPropsPacket(myProps), '\n'))
 		otherProps := other.sendPropsWithArray(getLoginProps)
 		if len(otherProps) == 0 {
 			continue
 		}
-		p.sendPacket(other.otherPropsPacket(otherProps))
+		p.sendPacket(append(other.otherPropsPacket(otherProps), '\n'))
 	}
 	p.server.playerMu.RUnlock()
 	if p.playerType&PLTYPE_ANYCLIENT != 0 && (p.versionId == 0 || p.versionId < 6015) {
@@ -3076,6 +3112,8 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 	p.server.logger.Debug("msgPLI_PLAYERPROPS: Processing %d bytes from %s", len(packet), p.accountName)
 	p.server.logger.Debug("msgPLI_PLAYERPROPS: Raw packet bytes: % X", packet)
 	buf := NewBufferFromBytes(packet[1:])
+	levelBuff := NewBuffer()
+	compatBuff := NewBuffer()
 	for buf.BytesLeft() > 0 {
 		propId := buf.ReadGChar()
 		p.server.logger.Debug("msgPLI_PLAYERPROPS: propId=%d", propId)
@@ -3222,16 +3260,46 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 			p.server.logger.Debug("msgPLI_PLAYERPROPS: unhandled propId=%d, stopping to avoid stream desync", propId)
 			return true
 		}
+		p.appendPlayerPropDelta(int(propId), levelBuff, compatBuff)
 	}
-	// Forward updated props to other players (PLO_OTHERPLPROPS)
-	p.server.logger.Debug("msgPLI_PLAYERPROPS: Forwarding to other players in level %s", p.levelName)
-	for _, pl := range p.server.players {
-		if pl != p && pl.isLoggedIn() && pl.levelName == p.levelName && pl.conn != nil {
-			pl.sendPLO_OTHERPLPROPS(p)
-		}
+	if p.isLoggedIn() && p.loaded && (levelBuff.Len() > 0 || compatBuff.Len() > 0) {
+		out := NewBuffer()
+		out.WriteByte(PLO_OTHERPLPROPS).WriteGShort(p.id)
+		out.Write(levelBuff.Bytes())
+		out.Write(compatBuff.Bytes())
+		p.server.logger.Debug("msgPLI_PLAYERPROPS: Forwarding %d changed prop bytes to level %s", out.Len(), p.levelName)
+		p.sendToCurrentLevelExceptSelf(out.Bytes())
 	}
 	p.server.logger.Debug("msgPLI_PLAYERPROPS: Done processing")
 	return true
+}
+
+func (p *Player) appendPlayerPropDelta(propId int, levelBuff, compatBuff *Buffer) {
+	if propId < 0 || propId >= len(sendLocalProps) || !sendLocalProps[propId] {
+		return
+	}
+	levelBuff.WriteGChar(byte(propId))
+	levelBuff.Write(p.getProp(propId))
+	switch propId {
+	case PLPROP_X:
+		compatBuff.WriteGChar(PLPROP_X2)
+		compatBuff.Write(p.getProp(PLPROP_X2))
+	case PLPROP_Y:
+		compatBuff.WriteGChar(PLPROP_Y2)
+		compatBuff.Write(p.getProp(PLPROP_Y2))
+	case PLPROP_Z:
+		compatBuff.WriteGChar(PLPROP_Z2)
+		compatBuff.Write(p.getProp(PLPROP_Z2))
+	case PLPROP_X2:
+		compatBuff.WriteGChar(PLPROP_X)
+		compatBuff.Write(p.getProp(PLPROP_X))
+	case PLPROP_Y2:
+		compatBuff.WriteGChar(PLPROP_Y)
+		compatBuff.Write(p.getProp(PLPROP_Y))
+	case PLPROP_Z2:
+		compatBuff.WriteGChar(PLPROP_Z)
+		compatBuff.Write(p.getProp(PLPROP_Z))
+	}
 }
 
 func (p *Player) readPlayerPowerImageProp(sword bool, buf *Buffer) {

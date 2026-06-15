@@ -192,6 +192,104 @@ func TestPostLoginTailSendsListProcessesAfterStatusAndPlayerExchange(t *testing.
 	}
 }
 
+func TestPostLoginTailExchangesAddPlayerAndOtherProps(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+	server := &Server{
+		logger:   NewLogger("", false),
+		settings: NewSettings(),
+		players:  make(map[uint16]*Player),
+	}
+	p := &Player{
+		id:            1,
+		server:        server,
+		playerType:    PLTYPE_CLIENT3,
+		versionId:     222,
+		queueOutgoing: true,
+	}
+	p.accountName = "moondeath"
+	p.character.nickName = "moondeath"
+	p.communityName = "moondeath"
+	p.levelName = "onlinestartlocal.nw"
+	other := &Player{
+		id:            2,
+		conn:          serverConn,
+		server:        server,
+		playerType:    PLTYPE_CLIENT3,
+		versionId:     222,
+		queueOutgoing: true,
+	}
+	other.accountName = "Z"
+	other.character.nickName = "Z"
+	other.communityName = "Z"
+	other.levelName = "onlinestartlocal.nw"
+	server.players[p.id] = p
+	server.players[other.id] = other
+
+	p.sendPostLoginTail()
+
+	pAdd := append([]byte{PLO_ADDPLAYER + 32}, NewBuffer().WriteGShort(other.id).Bytes()...)
+	pProps := append([]byte{PLO_OTHERPLPROPS + 32}, NewBuffer().WriteGShort(other.id).Bytes()...)
+	otherAdd := append([]byte{PLO_ADDPLAYER + 32}, NewBuffer().WriteGShort(p.id).Bytes()...)
+	otherProps := append([]byte{PLO_OTHERPLPROPS + 32}, NewBuffer().WriteGShort(p.id).Bytes()...)
+
+	if !bytes.Contains(p.outQueue, pAdd) {
+		t.Fatalf("new player did not receive existing player's PLO_ADDPLAYER: % X", p.outQueue)
+	}
+	if !bytes.Contains(p.outQueue, pProps) {
+		t.Fatalf("new player did not receive existing player's PLO_OTHERPLPROPS: % X", p.outQueue)
+	}
+	if !containsTerminatedPacket(p.outQueue, pProps) {
+		t.Fatalf("existing player's PLO_OTHERPLPROPS was not newline-terminated: % X", p.outQueue)
+	}
+	if !bytes.Contains(other.outQueue, otherAdd) {
+		t.Fatalf("existing player did not receive new player's PLO_ADDPLAYER: % X", other.outQueue)
+	}
+	if !bytes.Contains(other.outQueue, otherProps) {
+		t.Fatalf("existing player did not receive new player's PLO_OTHERPLPROPS: % X", other.outQueue)
+	}
+	if !containsTerminatedPacket(other.outQueue, otherProps) {
+		t.Fatalf("new player's PLO_OTHERPLPROPS was not newline-terminated: % X", other.outQueue)
+	}
+}
+
+func containsTerminatedPacket(stream, prefix []byte) bool {
+	idx := bytes.Index(stream, prefix)
+	if idx < 0 {
+		return false
+	}
+	end := bytes.IndexByte(stream[idx:], '\n')
+	return end >= 0
+}
+
+func TestDeletePlayerBroadcastsDelPlayer(t *testing.T) {
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
+	p := &Player{id: 1, server: server, playerType: PLTYPE_CLIENT3}
+	other := &Player{id: 2, server: server, playerType: PLTYPE_CLIENT3, queueOutgoing: true}
+	other.conn = nil
+	server.players[p.id] = p
+	server.players[other.id] = other
+
+	// A queued player may not have a live socket in tests; give it a dummy
+	// non-nil connection so DeletePlayer treats it like an active client.
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+	other.conn = serverConn
+
+	server.DeletePlayer(p)
+
+	want := append([]byte{PLO_DELPLAYER + 32}, NewBuffer().WriteGShort(p.id).Bytes()...)
+	want = append(want, '\n')
+	if !bytes.Equal(other.outQueue, want) {
+		t.Fatalf("delete player broadcast = % X, want % X", other.outQueue, want)
+	}
+}
+
 func TestOtherPropsPacketUsesOtherPlayerPropsHeader(t *testing.T) {
 	p := &Player{id: 0x1234}
 	props := []byte{byte(PLPROP_NICKNAME + 32), byte(len("moondeath") + 32)}
@@ -306,6 +404,52 @@ func TestLoginPropsMatchReferenceByOmittingNickname(t *testing.T) {
 	}
 	if !sendLoginProps[PLPROP_MAXPOWER] || !sendLoginProps[PLPROP_CURPOWER] {
 		t.Fatalf("sendLoginProps lost core health props")
+	}
+}
+
+func TestLoadAccountParsesDecimalAndRepairsInvalidHealth(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir+"\\accounts", 0755); err != nil {
+		t.Fatalf("create accounts dir: %v", err)
+	}
+	account := "GRACC001\r\n" +
+		"NAME moondeath\r\n" +
+		"NICK moondeath\r\n" +
+		"LEVEL onlinestartlocal.nw\r\n" +
+		"X 32.00\r\n" +
+		"Y 32.00\r\n" +
+		"MAXHP 3.00\r\n" +
+		"HP 3.00\r\n"
+	if err := os.WriteFile(dir+"\\accounts\\moondeath.txt", []byte(account), 0644); err != nil {
+		t.Fatalf("write account: %v", err)
+	}
+	server := &Server{logger: NewLogger("", false), config: NewFileSystem(dir)}
+	p := &Player{server: server}
+	p.setServer(server)
+
+	if !p.LoadAccount("moondeath", false) {
+		t.Fatalf("LoadAccount returned false")
+	}
+	if p.maxHitpoints != 3 || p.character.hitpoints != 3 {
+		t.Fatalf("health = max %d current %d, want 3/3", p.maxHitpoints, p.character.hitpoints)
+	}
+
+	broken := "GRACC001\r\n" +
+		"NAME Z\r\n" +
+		"NICK Z\r\n" +
+		"LEVEL onlinestartlocal.nw\r\n" +
+		"MAXHP 0\r\n" +
+		"HP 0\r\n"
+	if err := os.WriteFile(dir+"\\accounts\\Z.txt", []byte(broken), 0644); err != nil {
+		t.Fatalf("write broken account: %v", err)
+	}
+	q := &Player{server: server}
+	q.setServer(server)
+	if !q.LoadAccount("Z", false) {
+		t.Fatalf("LoadAccount broken returned false")
+	}
+	if q.maxHitpoints != 3 || q.character.hitpoints != 3 {
+		t.Fatalf("repaired health = max %d current %d, want 3/3", q.maxHitpoints, q.character.hitpoints)
 	}
 }
 
@@ -828,6 +972,83 @@ func TestPlayerPropsParsesTypedClientPropertyStream(t *testing.T) {
 	}
 	if p.levelName != "onlinestartlocal.nw" {
 		t.Fatalf("levelName = %q, want onlinestartlocal.nw", p.levelName)
+	}
+}
+
+func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	level := NewLevel()
+	level.levelName = "onlinestartlocal.nw"
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+		levels:  map[string]*Level{"onlinestartlocal": level},
+	}
+	p := &Player{
+		id:           1,
+		server:       server,
+		currentLevel: level,
+		playerType:   PLTYPE_CLIENT3,
+		loaded:       true,
+	}
+	p.levelName = "onlinestartlocal.nw"
+	other := &Player{
+		id:           2,
+		conn:         serverConn,
+		server:       server,
+		currentLevel: level,
+		playerType:   PLTYPE_CLIENT3,
+		encryption:   *NewEncryption(),
+	}
+	other.levelName = "onlinestartlocal.nw"
+	other.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[p.id] = p
+	server.players[other.id] = other
+	level.players = []uint16{p.id, other.id}
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_PLAYERPROPS)
+	packet.WriteGChar(PLPROP_GANI).WriteGChar(4).Write([]byte("walk"))
+	packet.WriteGChar(PLPROP_CURCHAT).WriteGChar(2).Write([]byte("hi"))
+	packet.WriteGChar(PLPROP_X).WriteGChar(64)
+	packet.WriteGChar(PLPROP_Y).WriteGChar(65)
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.msgPLI_PLAYERPROPS(packet.Bytes())
+		done <- struct{}{}
+	}()
+
+	id := NewBuffer()
+	id.WriteGShort(p.id)
+	want := append([]byte{PLO_OTHERPLPROPS + 32}, id.Bytes()...)
+	want = append(want, PLPROP_GANI+32, 4+32)
+	want = append(want, []byte("walk")...)
+	want = append(want, PLPROP_CURCHAT+32, 2+32)
+	want = append(want, []byte("hi")...)
+	want = append(want, PLPROP_X+32, 64+32, PLPROP_Y+32, 65+32)
+	wantX2 := NewBuffer()
+	wantX2.WriteGShort(64 * 8 * 2)
+	wantY2 := NewBuffer()
+	wantY2.WriteGShort(65 * 8 * 2)
+	want = append(want, PLPROP_X2+32)
+	want = append(want, wantX2.Bytes()...)
+	want = append(want, PLPROP_Y2+32)
+	want = append(want, wantY2.Bytes()...)
+	want = append(want, '\n')
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read other player prop delta: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("other player prop delta = % X, want % X", got, want)
 	}
 }
 
