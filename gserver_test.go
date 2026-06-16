@@ -761,6 +761,104 @@ func TestLoadAccountParsesDecimalAndRepairsInvalidHealth(t *testing.T) {
 	}
 }
 
+func TestLoginWarpTargetUsesSavedAccountLocation(t *testing.T) {
+	p := &Player{server: &Server{logger: NewLogger("", false), settings: NewSettings()}}
+	p.levelName = "inside house.nw"
+	p.setX(44)
+	p.setY(45.5)
+
+	levelName, x, y := p.loginWarpTarget()
+
+	if levelName != "inside house.nw" || x != 44 || y != 45.5 {
+		t.Fatalf("login target = %q %.2f %.2f, want inside house.nw 44.00 45.50", levelName, x, y)
+	}
+}
+
+func TestOneMinuteEventsSavesMovedPlayerAccount(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{
+		logger:  NewLogger("", false),
+		config:  NewFileSystem(dir),
+		players: make(map[uint16]*Player),
+	}
+	p := &Player{
+		id:         1,
+		server:     server,
+		playerType: PLTYPE_CLIENT3,
+	}
+	p.setServer(server)
+	p.accountName = "moondeath"
+	p.communityName = "moondeath"
+	p.character.nickName = "moondeath"
+	p.character.gani = "idle.gif"
+	p.maxHitpoints = 3
+	p.character.hitpoints = 3
+	p.flagList = make(map[string]string)
+	server.players[p.id] = p
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_PLAYERPROPS)
+	packet.WriteGChar(PLPROP_X2).WriteGShort(encodeSignedGShortCoord(44 * 16))
+	packet.WriteGChar(PLPROP_Y2).WriteGShort(encodeSignedGShortCoord(45 * 16))
+	packet.WriteGChar(PLPROP_CURLEVEL).WriteGChar(byte(len("inside house.nw"))).Write([]byte("inside house.nw"))
+	if !p.msgPLI_PLAYERPROPS(packet.Bytes()) {
+		t.Fatalf("msgPLI_PLAYERPROPS returned false")
+	}
+
+	server.oneMinuteEvents()
+
+	data, err := os.ReadFile(dir + "\\accounts\\moondeath.txt")
+	if err != nil {
+		t.Fatalf("read saved account: %v", err)
+	}
+	for _, want := range []string{"LEVEL inside house.nw\r\n", "X 44.00\r\n", "Y 45.00\r\n"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("saved account missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestDisconnectSavesPlayerAccount(t *testing.T) {
+	dir := t.TempDir()
+	server := &Server{
+		logger:  NewLogger("", false),
+		config:  NewFileSystem(dir),
+		players: make(map[uint16]*Player),
+	}
+	p := &Player{
+		id:         1,
+		server:     server,
+		playerType: PLTYPE_CLIENT3,
+	}
+	p.setServer(server)
+	p.accountName = "moondeath"
+	p.communityName = "moondeath"
+	p.character.nickName = "moondeath"
+	p.character.gani = "idle.gif"
+	p.maxHitpoints = 3
+	p.character.hitpoints = 3
+	p.levelName = "onlinestartlocal.nw"
+	p.setX(50)
+	p.setY(51)
+	p.flagList = make(map[string]string)
+	server.players[p.id] = p
+
+	p.disconnect()
+
+	data, err := os.ReadFile(dir + "\\accounts\\moondeath.txt")
+	if err != nil {
+		t.Fatalf("read saved account: %v", err)
+	}
+	for _, want := range []string{"LEVEL onlinestartlocal.nw\r\n", "X 50.00\r\n", "Y 51.00\r\n"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("saved account missing %q:\n%s", want, data)
+		}
+	}
+	if _, exists := server.players[p.id]; exists {
+		t.Fatalf("disconnect did not remove player from server")
+	}
+}
+
 func TestLevelBoardPacketUsesEncodedPacketID(t *testing.T) {
 	level := NewLevel()
 	level.tiles[0] = &LevelTiles{width: 64, height: 64, tiles: make([]int16, 4096)}

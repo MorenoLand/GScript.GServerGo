@@ -259,11 +259,23 @@ func (s *Server) processLevelBoardRespawns() {
 	}
 }
 
-func (s *Server) oneMinuteEvents() { s.logger.Debug("One minute timer") }
+func (s *Server) oneMinuteEvents() {
+	s.logger.Debug("One minute timer")
+	s.savePlayerAccounts()
+}
 
 func (s *Server) fiveMinuteEvents() {
 	s.logger.Info("Five minute timer - saving data")
 	s.saveData()
+}
+
+func (s *Server) savePlayerAccounts() {
+	for _, player := range s.GetAllPlayers() {
+		if player != nil && player.isLoggedIn() {
+			player.SaveAccount()
+			player.lastSave = time.Now()
+		}
+	}
 }
 
 func (s *Server) log(msg string) { s.logger.Write(msg) }
@@ -1138,7 +1150,7 @@ func (a *Account) normalizeHealth() {
 func (a *Account) SaveAccount() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if a.isLoadOnly {
+	if a.isLoadOnly || a.server == nil || a.server.config == nil || a.accountName == "" {
 		return false
 	}
 	var buf strings.Builder
@@ -1938,15 +1950,9 @@ func (p *Player) handleLogin(packet []byte) bool {
 	}
 	p.server.logger.Info("Sending PLO_UNKNOWN190...")
 	p.sendPLO_UNKNOWN190()
-	startLevel := p.server.settings.Get("startlevel")
-	if startLevel == "" {
-		startLevel = p.server.settings.Get("unstickmelevel")
-	}
-	if startLevel == "" {
-		startLevel = "onlinestartlocal.nw"
-	}
-	p.server.logger.Info("Warping player to '%s'...", startLevel)
-	p.warp(startLevel, 32, 32)
+	startLevel, startX, startY := p.loginWarpTarget()
+	p.server.logger.Info("Warping player to '%s' at (%.2f, %.2f)...", startLevel, startX, startY)
+	p.warp(startLevel, startX, startY)
 	p.server.logger.Info("Sending weapons...")
 	for _, weaponName := range p.weaponList {
 		if strings.HasPrefix(weaponName, "-") {
@@ -2235,8 +2241,12 @@ func (p *Player) disconnect() {
 	level := p.currentLevel
 	p.currentLevel = nil
 	server := p.server
+	shouldSave := p.isLoggedIn()
 	p.mu.Unlock()
 
+	if shouldSave {
+		p.SaveAccount()
+	}
 	if conn != nil {
 		conn.Close()
 	}
@@ -2929,6 +2939,25 @@ func (p *Player) processTimeout() {
 	if time.Since(p.lastData) > 5*time.Minute {
 		p.disconnect()
 	}
+}
+
+func (p *Player) loginWarpTarget() (string, float64, float64) {
+	levelName := p.levelName
+	x := float64(p.getX())
+	y := float64(p.getY())
+	if levelName != "" {
+		return levelName, x, y
+	}
+	if p.server != nil && p.server.settings != nil {
+		levelName = p.server.settings.Get("startlevel")
+		if levelName == "" {
+			levelName = p.server.settings.Get("unstickmelevel")
+		}
+	}
+	if levelName == "" {
+		levelName = "onlinestartlocal.nw"
+	}
+	return levelName, 32, 32
 }
 
 func (p *Player) getId() uint16           { return p.id }
