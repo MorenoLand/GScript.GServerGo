@@ -5340,134 +5340,68 @@ func (p *Player) msgPLI_RC_FILEBROWSER_START(packet []byte) bool {
 	for _, folder := range p.folderList {
 		folders += folder + "\n"
 	}
-	folders = strings.ReplaceAll(folders, "\n", "\x01")
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RC_FILEBROWSER_DIRLIST)
-	buf.WriteString8(folders)
+	buf.Write([]byte(gtokenizeText(folders)))
 	p.send(buf)
 	if !p.isFtp {
 		buf2 := NewBuffer()
 		buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-		buf2.WriteString8("Welcome to the File Browser.")
+		buf2.Write([]byte("Welcome to the File Browser."))
 		p.send(buf2)
 	}
-	folderMap := make(map[string]string)
-	for _, folder := range p.folderList {
-		parts := strings.SplitN(folder, " ", 2)
-		rights := "r"
-		folderPath := folder
-		if len(parts) == 2 {
-			rights = strings.ToLower(strings.TrimSpace(parts[0]))
-			folderPath = strings.TrimSpace(parts[1])
-		}
-		folderPath = strings.ReplaceAll(folderPath, "\\", "/")
-		folderPath = strings.TrimSpace(folderPath)
-		if idx := strings.LastIndex(folderPath, "/"); idx != len(folderPath)-1 {
-			wild := "*"
-			if idx != -1 {
-				wild = folderPath[idx+1:]
-				folderPath = folderPath[:idx+1]
-			}
-			folderMap[folderPath] += rights + ":" + wild + "\n"
-		} else {
-			folderMap[folderPath] += rights + ":*\n"
-		}
-	}
+	folderMap := p.rcFolderMap()
 	if _, exists := folderMap[p.lastFolder]; !exists {
 		for folder := range folderMap {
 			p.lastFolder = folder
 			break
 		}
 	}
-	files, err := p.server.config.ListFiles(p.lastFolder)
-	if err != nil {
-		p.server.logger.Error("Failed to list files in %s: %v", p.lastFolder, err)
-		return true
-	}
-	buf3 := NewBuffer()
-	buf3.WriteByte(PLO_RC_FILEBROWSER_DIR)
-	buf3.WriteString8(p.lastFolder)
-	wildcards := strings.Split(folderMap[p.lastFolder], "\n")
-	for _, wildcardEntry := range wildcards {
-		if wildcardEntry == "" {
-			continue
-		}
-		parts := strings.SplitN(wildcardEntry, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		rights := parts[0]
-		wildcard := parts[1]
-		for _, file := range files {
-			matched, err := filepath.Match(wildcard, file)
-			if err != nil || !matched {
-				continue
-			}
-			filePath := p.lastFolder + file
-			fileInfo, err := p.server.config.FileInfo(filePath)
-			if err != nil {
-				continue
-			}
-			dirBuf := NewBuffer()
-			dirBuf.WriteString8(file)
-			dirBuf.WriteString8(rights)
-			dirBuf.WriteInt(int32(fileInfo.Size()))
-			dirBuf.WriteInt(int32(fileInfo.ModTime().Unix()))
-			dirData := dirBuf.Bytes()
-			buf3.WriteByte(byte(len(dirData)))
-			buf3.Write(dirData)
-			buf3.WriteByte(' ')
-		}
-	}
-	p.send(buf3)
+	p.sendRCFileBrowserDir(folderMap)
 	p.isFtp = true
 	return true
 }
-func (p *Player) msgPLI_RC_FILEBROWSER_CD(packet []byte) bool {
-	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
-		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_CD (non-RC)", p.accountName)
-		return true
-	}
-	buf := NewBufferFromBytes(packet)
-	newFolder := buf.ReadGString()
+
+func fileBrowserMessagePacket(message string) *Buffer {
+	buf := NewBuffer()
+	buf.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
+	buf.Write([]byte(message))
+	return buf
+}
+
+func (p *Player) rcFolderMap() map[string]string {
 	folderMap := make(map[string]string)
 	for _, folder := range p.folderList {
-		parts := strings.SplitN(folder, " ", 2)
 		rights := "r"
 		folderPath := folder
-		if len(parts) == 2 {
+		if parts := strings.SplitN(folder, " ", 2); len(parts) == 2 {
 			rights = strings.ToLower(strings.TrimSpace(parts[0]))
 			folderPath = strings.TrimSpace(parts[1])
 		}
 		folderPath = strings.ReplaceAll(folderPath, "\\", "/")
 		folderPath = strings.TrimSpace(folderPath)
-		if idx := strings.LastIndex(folderPath, "/"); idx != len(folderPath)-1 {
-			wild := "*"
-			if idx != -1 {
+		wild := "*"
+		if !strings.HasSuffix(folderPath, "/") {
+			if idx := strings.LastIndex(folderPath, "/"); idx != -1 {
 				wild = folderPath[idx+1:]
 				folderPath = folderPath[:idx+1]
 			}
-			folderMap[folderPath] += rights + ":" + wild + "\n"
-		} else {
-			folderMap[folderPath] += rights + ":*\n"
 		}
+		folderMap[folderPath] += rights + ":" + wild + "\n"
 	}
-	if _, exists := folderMap[newFolder]; !exists {
-		return true
-	}
-	p.lastFolder = newFolder
+	return folderMap
+}
+
+func (p *Player) sendRCFileBrowserDir(folderMap map[string]string) {
 	files, err := p.server.config.ListFiles(p.lastFolder)
 	if err != nil {
 		p.server.logger.Error("Failed to list files in %s: %v", p.lastFolder, err)
-		return true
+		return
 	}
-	buf2 := NewBuffer()
-	buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-	buf2.WriteString8("Folder changed to " + p.lastFolder)
-	p.send(buf2)
-	buf3 := NewBuffer()
-	buf3.WriteByte(PLO_RC_FILEBROWSER_DIR)
-	buf3.WriteString8(p.lastFolder)
+	buf := NewBuffer()
+	buf.WriteByte(PLO_RC_FILEBROWSER_DIR)
+	buf.WriteByte(byte(len(p.lastFolder)))
+	buf.Write([]byte(p.lastFolder))
 	wildcards := strings.Split(folderMap[p.lastFolder], "\n")
 	for _, wildcardEntry := range wildcards {
 		if wildcardEntry == "" {
@@ -5489,18 +5423,41 @@ func (p *Player) msgPLI_RC_FILEBROWSER_CD(packet []byte) bool {
 			if err != nil {
 				continue
 			}
-			dirBuf := NewBuffer()
-			dirBuf.WriteString8(file)
-			dirBuf.WriteString8(rights)
-			dirBuf.WriteInt(int32(fileInfo.Size()))
-			dirBuf.WriteInt(int32(fileInfo.ModTime().Unix()))
-			dirData := dirBuf.Bytes()
-			buf3.WriteByte(byte(len(dirData)))
-			buf3.Write(dirData)
-			buf3.WriteByte(' ')
+			entry := NewBuffer()
+			entry.WriteByte(byte(len(file)))
+			entry.Write([]byte(file))
+			entry.WriteByte(byte(len(rights)))
+			entry.Write([]byte(rights))
+			entry.WriteGInt5(uint64(fileInfo.Size()))
+			entry.WriteGInt5(uint64(fileInfo.ModTime().Unix()))
+			entryData := entry.Bytes()
+			buf.WriteByte(' ')
+			buf.WriteByte(byte(len(entryData)))
+			buf.Write(entryData)
 		}
 	}
-	p.send(buf3)
+	p.send(buf)
+}
+
+func (p *Player) msgPLI_RC_FILEBROWSER_CD(packet []byte) bool {
+	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
+		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_CD (non-RC)", p.accountName)
+		return true
+	}
+	newFolder := ""
+	if len(packet) > 1 {
+		newFolder = string(packet[1:])
+	}
+	folderMap := p.rcFolderMap()
+	if _, exists := folderMap[newFolder]; !exists {
+		return true
+	}
+	p.lastFolder = newFolder
+	buf2 := NewBuffer()
+	buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
+	buf2.Write([]byte("Folder changed to " + p.lastFolder))
+	p.send(buf2)
+	p.sendRCFileBrowserDir(folderMap)
 	return true
 }
 func (p *Player) msgPLI_RC_FILEBROWSER_END(packet []byte) bool {
@@ -5516,46 +5473,61 @@ func (p *Player) msgPLI_RC_FILEBROWSER_DOWN(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_DOWN (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	fileName := buf.ReadGString()
+	fileName := ""
+	if len(packet) > 1 {
+		fileName = string(packet[1:])
+	}
 	filePath := p.lastFolder + fileName
 	protectedFiles := []string{"accounts/defaultaccount.txt", "config/adminconfig.txt", "config/allowedversions.txt", "config/rchelp.txt"}
 	if !p.hasRight(PLPERM_MODIFYSTAFFACCOUNT) {
 		for _, protected := range protectedFiles {
 			if filePath == protected {
-				buf2 := NewBuffer()
-				buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-				buf2.WriteString8("Insufficient rights to download/view " + filePath)
-				p.send(buf2)
+				p.send(fileBrowserMessagePacket("Insufficient rights to download/view " + filePath))
 				return true
 			}
 		}
 	}
+	p.sendRCFileBrowserFile(fileName, filePath)
+	p.server.logger.Info("%s downloaded file %s", p.accountName, fileName)
+	p.send(fileBrowserMessagePacket("Downloaded file " + fileName))
+	return true
+}
+
+func (p *Player) sendRCFileBrowserFile(fileName, filePath string) {
 	data, err := p.server.config.LoadFile(filePath)
 	if err != nil {
 		p.server.logger.Error("Failed to load file %s: %v", filePath, err)
-		return true
+		p.sendPLO_FILESENDFAILED(fileName)
+		return
 	}
-	buf2 := NewBuffer()
-	buf2.WriteByte(PLO_FILE)
-	buf2.WriteString8(fileName)
-	buf2.WriteInt(int32(len(data)))
-	buf2.Write(data)
-	p.send(buf2)
-	p.server.logger.Info("%s downloaded file %s", p.accountName, fileName)
-	buf3 := NewBuffer()
-	buf3.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-	buf3.WriteString8("Downloaded file " + fileName)
-	p.send(buf3)
-	return true
+	modTime := time.Time{}
+	if p.server != nil && p.server.config != nil {
+		modTime, _ = p.server.config.FileModTime(filePath)
+	}
+	filePacket := NewBuffer()
+	filePacket.WriteGChar(PLO_FILE)
+	filePacket.WriteGInt5(uint64(modTime.Unix()))
+	filePacket.WriteGChar(byte(len(fileName)))
+	filePacket.Write([]byte(fileName))
+	filePacket.Write(data)
+	filePacket.WriteByte('\n')
+
+	buf := NewBuffer()
+	buf.WriteByte(PLO_RAWDATA)
+	buf.WriteGInt(uint32(filePacket.Len()))
+	buf.WriteByte('\n')
+	buf.Write(filePacket.Bytes())
+	p.sendPacket(buf.Bytes())
 }
+
 func (p *Player) msgPLI_RC_FILEBROWSER_UP(packet []byte) bool {
 	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
 		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_UP (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	fileName := buf.ReadGString()
+	buf := NewBufferFromBytes(packet[1:])
+	nameLen := int(buf.ReadByte())
+	fileName := string(buf.ReadBytes(nameLen))
 	filePath := p.lastFolder + fileName
 	importantFiles := []string{"accounts/defaultaccount.txt", "config/adminconfig.txt", "config/allowedversions.txt", "config/foldersconfig.txt", "config/ipbans.txt", "config/rchelp.txt", "config/rcmessage.txt", "config/rules.txt", "config/servermessage.html", "config/serveroptions.txt"}
 	importantFileRights := []int{PLPERM_MODIFYSTAFFACCOUNT, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_SETFOLDEROPTIONS, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_MODIFYSTAFFACCOUNT, PLPERM_SETSERVEROPTIONS}
@@ -5576,10 +5548,7 @@ func (p *Player) msgPLI_RC_FILEBROWSER_UP(packet []byte) bool {
 		}
 	}
 	if isProtected && !hasPermission {
-		buf2 := NewBuffer()
-		buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-		buf2.WriteString8("Insufficient rights to upload " + filePath)
-		p.send(buf2)
+		p.send(fileBrowserMessagePacket("Insufficient rights to upload " + filePath))
 		return true
 	}
 	fileData := buf.ReadBytes(buf.Remaining())
@@ -5589,10 +5558,7 @@ func (p *Player) msgPLI_RC_FILEBROWSER_UP(packet []byte) bool {
 			return true
 		}
 		p.server.logger.Info("%s uploaded file %s", p.accountName, fileName)
-		buf3 := NewBuffer()
-		buf3.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-		buf3.WriteString8("Uploaded file " + fileName)
-		p.send(buf3)
+		p.send(fileBrowserMessagePacket("Uploaded file " + fileName))
 	} else {
 		p.rcLargeFiles[fileName] += string(fileData)
 	}
@@ -5607,9 +5573,10 @@ func (p *Player) msgPLI_RC_FILEBROWSER_MOVE(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_MOVE (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	dir := buf.ReadGString()
-	fileName := buf.ReadGString()
+	buf := NewBufferFromBytes(packet[1:])
+	dirLen := int(buf.ReadByte())
+	dir := string(buf.ReadBytes(dirLen))
+	fileName := string(buf.ReadBytes(buf.Remaining()))
 	fileName = strings.ReplaceAll(fileName, "\"", "")
 	if !strings.HasSuffix(dir, "/") && !strings.HasSuffix(dir, "\\") {
 		dir += "/"
@@ -5619,10 +5586,7 @@ func (p *Player) msgPLI_RC_FILEBROWSER_MOVE(packet []byte) bool {
 	importantFiles := []string{"accounts/defaultaccount.txt", "config/adminconfig.txt", "config/allowedversions.txt", "config/foldersconfig.txt", "config/ipbans.txt", "config/rchelp.txt", "config/rcmessage.txt", "config/rules.txt", "config/servermessage.html", "config/serveroptions.txt"}
 	for _, important := range importantFiles {
 		if source == important {
-			buf2 := NewBuffer()
-			buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-			buf2.WriteString8("Not allowed to move file " + source)
-			p.send(buf2)
+			p.send(fileBrowserMessagePacket("Not allowed to move file " + source))
 			return true
 		}
 	}
@@ -5647,32 +5611,25 @@ func (p *Player) msgPLI_RC_FILEBROWSER_DELETE(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_DELETE (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	fileName := buf.ReadGString()
+	fileName := ""
+	if len(packet) > 1 {
+		fileName = string(packet[1:])
+	}
 	filePath := p.lastFolder + fileName
 	importantFiles := []string{"accounts/defaultaccount.txt", "config/adminconfig.txt", "config/allowedversions.txt", "config/foldersconfig.txt", "config/ipbans.txt", "config/rchelp.txt", "config/rcmessage.txt", "config/rules.txt", "config/servermessage.html", "config/serveroptions.txt"}
 	for _, important := range importantFiles {
 		if filePath == important {
-			buf2 := NewBuffer()
-			buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-			buf2.WriteString8("Not allowed to delete file " + filePath)
-			p.send(buf2)
+			p.send(fileBrowserMessagePacket("Not allowed to delete file " + filePath))
 			return true
 		}
 	}
 	if err := p.server.config.DeleteFile(filePath); err != nil {
 		p.server.logger.Error("Failed to delete file %s: %v", filePath, err)
-		buf3 := NewBuffer()
-		buf3.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-		buf3.WriteString8("Error removing " + fileName + ". File may not exist or may not be empty.")
-		p.send(buf3)
+		p.send(fileBrowserMessagePacket("Error removing " + fileName + ". File may not exist or may not be empty."))
 		return true
 	}
 	p.server.logger.Info("%s deleted file %s", p.accountName, fileName)
-	buf4 := NewBuffer()
-	buf4.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-	buf4.WriteString8("Deleted file " + fileName)
-	p.send(buf4)
+	p.send(fileBrowserMessagePacket("Deleted file " + fileName))
 	return true
 }
 func (p *Player) msgPLI_RC_FILEBROWSER_RENAME(packet []byte) bool {
@@ -5680,18 +5637,17 @@ func (p *Player) msgPLI_RC_FILEBROWSER_RENAME(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted FILEBROWSER_RENAME (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	oldName := buf.ReadGString()
-	newName := buf.ReadGString()
+	buf := NewBufferFromBytes(packet[1:])
+	oldLen := int(buf.ReadByte())
+	oldName := string(buf.ReadBytes(oldLen))
+	newLen := int(buf.ReadByte())
+	newName := string(buf.ReadBytes(newLen))
 	oldPath := p.lastFolder + oldName
 	newPath := p.lastFolder + newName
 	importantFiles := []string{"accounts/defaultaccount.txt", "config/adminconfig.txt", "config/allowedversions.txt", "config/foldersconfig.txt", "config/ipbans.txt", "config/rchelp.txt", "config/rcmessage.txt", "config/rules.txt", "config/servermessage.html", "config/serveroptions.txt"}
 	for _, important := range importantFiles {
 		if oldPath == important || newPath == important {
-			buf2 := NewBuffer()
-			buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-			buf2.WriteString8("Not allowed to rename/overwrite file " + oldPath + " or " + newPath)
-			p.send(buf2)
+			p.send(fileBrowserMessagePacket("Not allowed to rename/overwrite file " + oldPath + " or " + newPath))
 			return true
 		}
 	}
@@ -5709,10 +5665,7 @@ func (p *Player) msgPLI_RC_FILEBROWSER_RENAME(packet []byte) bool {
 		return true
 	}
 	p.server.logger.Info("%s renamed file %s to %s", p.accountName, oldName, newName)
-	buf3 := NewBuffer()
-	buf3.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-	buf3.WriteString8("Renamed file " + oldName + " to " + newName)
-	p.send(buf3)
+	p.send(fileBrowserMessagePacket("Renamed file " + oldName + " to " + newName))
 	return true
 }
 func (p *Player) msgPLI_RC_LARGEFILESTART(packet []byte) bool {
@@ -5720,8 +5673,10 @@ func (p *Player) msgPLI_RC_LARGEFILESTART(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted LARGEFILESTART (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	fileName := buf.ReadGString()
+	fileName := ""
+	if len(packet) > 1 {
+		fileName = string(packet[1:])
+	}
 	p.rcLargeFiles[fileName] = ""
 	return true
 }
@@ -5730,8 +5685,10 @@ func (p *Player) msgPLI_RC_LARGEFILEEND(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted LARGEFILEEND (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	fileName := buf.ReadGString()
+	fileName := ""
+	if len(packet) > 1 {
+		fileName = string(packet[1:])
+	}
 	filePath := p.lastFolder + fileName
 	fileData, exists := p.rcLargeFiles[fileName]
 	if !exists {
@@ -5743,15 +5700,14 @@ func (p *Player) msgPLI_RC_LARGEFILEEND(packet []byte) bool {
 	}
 	delete(p.rcLargeFiles, fileName)
 	p.server.logger.Info("%s uploaded large file %s", p.accountName, fileName)
-	buf2 := NewBuffer()
-	buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-	buf2.WriteString8("Uploaded large file " + fileName)
-	p.send(buf2)
+	p.send(fileBrowserMessagePacket("Uploaded large file " + fileName))
 	return true
 }
 func (p *Player) msgPLI_RC_FOLDERDELETE(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	folder := buf.ReadGString()
+	folder := ""
+	if len(packet) > 1 {
+		folder = string(packet[1:])
+	}
 	folderPath := p.server.config.GetBasePath() + "/" + folder
 	folderPath = strings.ReplaceAll(folderPath, "/", "\\")
 	if len(folderPath) > 0 && folderPath[len(folderPath)-1] == '\\' {
@@ -5763,10 +5719,7 @@ func (p *Player) msgPLI_RC_FOLDERDELETE(packet []byte) bool {
 	}
 	if err := os.RemoveAll(folderPath); err != nil {
 		p.server.logger.Error("Failed to remove folder %s: %v", folderPath, err)
-		buf2 := NewBuffer()
-		buf2.WriteByte(PLO_RC_FILEBROWSER_MESSAGE)
-		buf2.WriteString8("Error removing " + folder + ". Folder may not exist or may not be empty.")
-		p.send(buf2)
+		p.send(fileBrowserMessagePacket("Error removing " + folder + ". Folder may not exist or may not be empty."))
 		return true
 	}
 	p.server.logger.Info("%s deleted folder %s", p.accountName, folder)

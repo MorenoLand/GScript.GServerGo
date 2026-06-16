@@ -262,6 +262,118 @@ func TestGTokenizeTextRoundTripsConfigLines(t *testing.T) {
 	}
 }
 
+func TestRCFileBrowserStartSendsTokenizedFoldersAndDirectory(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "levels/test.nw", "level")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw levels/*.nw"}
+
+	rc.msgPLI_RC_FILEBROWSER_START([]byte{PLI_RC_FILEBROWSER_START})
+
+	dirListPrefix := []byte{PLO_RC_FILEBROWSER_DIRLIST + 32}
+	if !bytes.HasPrefix(rc.outQueue, dirListPrefix) {
+		t.Fatalf("file browser did not start with dirlist: % X", rc.outQueue)
+	}
+	dirListEnd := bytes.IndexByte(rc.outQueue, '\n')
+	if dirListEnd < 0 {
+		t.Fatalf("dirlist packet missing terminator: % X", rc.outQueue)
+	}
+	dirListPayload := rc.outQueue[1:dirListEnd]
+	if string(dirListPayload) != "\"rw levels/*.nw\"" {
+		t.Fatalf("dirlist payload = %q", dirListPayload)
+	}
+	if !bytes.Contains(rc.outQueue, append([]byte{PLO_RC_FILEBROWSER_MESSAGE + 32}, []byte("Welcome to the File Browser.\n")...)) {
+		t.Fatalf("file browser welcome missing or malformed: % X", rc.outQueue)
+	}
+
+	wantPrefix := append([]byte{PLO_RC_FILEBROWSER_DIR + 32, byte(len("levels/"))}, []byte("levels/")...)
+	dirIndex := bytes.Index(rc.outQueue, wantPrefix)
+	if dirIndex < 0 {
+		t.Fatalf("dir packet prefix missing from % X, want % X", rc.outQueue, wantPrefix)
+	}
+	dirPacket := rc.outQueue[dirIndex:]
+	if !bytes.HasPrefix(dirPacket, wantPrefix) {
+		t.Fatalf("dir packet prefix = % X, want % X", dirPacket, wantPrefix)
+	}
+	entryStart := 1 + 1 + len("levels/")
+	if dirPacket[entryStart] != ' ' {
+		t.Fatalf("dir entry separator = %02X, want space in % X", dirPacket[entryStart], dirPacket)
+	}
+	entryLen := int(dirPacket[entryStart+1])
+	entry := dirPacket[entryStart+2 : entryStart+2+entryLen]
+	if entry[0] != byte(len("test.nw")) || string(entry[1:1+len("test.nw")]) != "test.nw" {
+		t.Fatalf("dir entry filename malformed: % X", entry)
+	}
+	rightsOffset := 1 + len("test.nw")
+	if entry[rightsOffset] != byte(len("rw")) || string(entry[rightsOffset+1:rightsOffset+1+len("rw")]) != "rw" {
+		t.Fatalf("dir entry rights malformed: % X", entry)
+	}
+	if len(entry) != rightsOffset+1+len("rw")+10 {
+		t.Fatalf("dir entry should contain two GInt5 values, got %d bytes: % X", len(entry), entry)
+	}
+}
+
+func TestRCFileBrowserCDParsesRawFolderAndSendsDirectory(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "levels/test.nw", "level")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw levels/*.nw"}
+
+	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("levels/")...))
+
+	if rc.lastFolder != "levels/" {
+		t.Fatalf("lastFolder = %q, want levels/", rc.lastFolder)
+	}
+	if !bytes.Contains(rc.outQueue, append([]byte{PLO_RC_FILEBROWSER_DIR + 32, byte(len("levels/"))}, []byte("levels/")...)) {
+		t.Fatalf("cd did not send directory packet: % X", rc.outQueue)
+	}
+}
+
+func TestRCFileBrowserUploadParsesString8FilenameAndRawData(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw levels/*.nw"}
+	rc.lastFolder = "levels/"
+
+	packet := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("upload.nw"))}, []byte("upload.nw")...)
+	packet = append(packet, []byte("uploaded")...)
+	rc.msgPLI_RC_FILEBROWSER_UP(packet)
+
+	got, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "levels", "upload.nw"))
+	if err != nil {
+		t.Fatalf("read uploaded file: %v", err)
+	}
+	if string(got) != "uploaded" {
+		t.Fatalf("uploaded file = %q", got)
+	}
+}
+
+func TestRCFileBrowserDownloadWrapsFilePacketInRawData(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "levels/test.nw", "level")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.lastFolder = "levels/"
+
+	rc.msgPLI_RC_FILEBROWSER_DOWN(append([]byte{PLI_RC_FILEBROWSER_DOWN}, []byte("test.nw")...))
+
+	embedded := NewBuffer()
+	embedded.WriteGChar(PLO_FILE)
+	embedded.WriteGInt5(uint64(0))
+	embedded.WriteGChar(byte(len("test.nw")))
+	embedded.Write([]byte("test.nw"))
+	embedded.Write([]byte("level"))
+	embedded.WriteByte('\n')
+
+	wantPrefix := append([]byte{PLO_RAWDATA + 32}, NewBuffer().WriteGInt(uint32(embedded.Len())).Bytes()...)
+	wantPrefix = append(wantPrefix, '\n', PLO_FILE+32)
+	if !bytes.HasPrefix(rc.outQueue, wantPrefix) {
+		t.Fatalf("download packet prefix = % X, want prefix % X", rc.outQueue, wantPrefix)
+	}
+	if !bytes.Contains(rc.outQueue, []byte("test.nwlevel\n")) {
+		t.Fatalf("download packet missing filename/data: % X", rc.outQueue)
+	}
+}
+
 func TestAccountLoadsAndSavesIP(t *testing.T) {
 	server := newLoginTestServer(t)
 	accountPath := filepath.Join(server.config.GetBasePath(), "accounts", "Admin.txt")
@@ -363,6 +475,28 @@ func newLoginTestServer(t *testing.T) *Server {
 	server.adminSettings = NewSettings()
 	server.logger = NewLogger("", false)
 	return server
+}
+
+func newRCFileBrowserTestPlayer(server *Server) *Player {
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.id = 9
+	rc.accountName = "Admin"
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	rc.rcLargeFiles = make(map[string]string)
+	return rc
+}
+
+func writeTestFile(t *testing.T, basePath, relPath, contents string) {
+	t.Helper()
+	fullPath := filepath.Join(basePath, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		t.Fatalf("create test file dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte(contents), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
 }
 
 func buildLoginPacket(t *testing.T, clientTypeByte byte, encryptionKey byte, version, account, password, identity string) []byte {
