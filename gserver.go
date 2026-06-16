@@ -228,6 +228,7 @@ func (s *Server) oneSecondEvents() {
 	if s.serverList != nil {
 		s.serverList.doTimedEvents()
 	}
+	s.processLevelBoardRespawns()
 	s.npcMu.Lock()
 	for _, npc := range s.npcs {
 		if npc.timeout > 0 {
@@ -241,6 +242,20 @@ func (s *Server) oneSecondEvents() {
 	players := s.GetAllPlayers()
 	for _, player := range players {
 		player.processTimeout()
+	}
+}
+
+func (s *Server) processLevelBoardRespawns() {
+	s.levelMu.RLock()
+	levels := make([]*Level, 0, len(s.levels))
+	for _, level := range s.levels {
+		levels = append(levels, level)
+	}
+	s.levelMu.RUnlock()
+	for _, level := range levels {
+		if level != nil {
+			level.processBoardRespawns(s)
+		}
 	}
 }
 
@@ -848,6 +863,28 @@ func (s *Server) SendPacketToType(playerType int, packet []byte, exclude *Player
 	for _, player := range s.players {
 		if player.getType() == playerType && player != exclude {
 			player.sendPacket(packet)
+		}
+	}
+}
+
+func (s *Server) broadcastBoardModify(level *Level, x, y, width, height int16, tiles []int16) {
+	if level == nil {
+		return
+	}
+	for _, plId := range level.getPlayers() {
+		if pl := s.GetPlayer(plId); pl != nil && pl.conn != nil {
+			pl.sendPLO_BOARDMODIFY(x, y, width, height, tiles)
+		}
+	}
+}
+
+func (s *Server) broadcastItemAdd(level *Level, x, y int16, itemIdx int) {
+	if level == nil {
+		return
+	}
+	for _, plId := range level.getPlayers() {
+		if pl := s.GetPlayer(plId); pl != nil && pl.conn != nil {
+			pl.sendPLO_ITEMADD(x, y, itemIdx, "")
 		}
 	}
 }
@@ -2550,7 +2587,7 @@ func (p *Player) sendPLO_TOALL(message string) bool {
 }
 func (p *Player) sendPLO_BOARDMODIFY(x, y, width, height int16, tiles []int16) bool {
 	buf := NewBuffer()
-	buf.WriteByte(PLO_BOARDMODIFY).WriteShort(x).WriteShort(y).WriteShort(width).WriteShort(height)
+	buf.WriteByte(PLO_BOARDMODIFY).WriteGChar(byte(x)).WriteGChar(byte(y)).WriteGChar(byte(width)).WriteGChar(byte(height))
 	for _, tile := range tiles {
 		buf.WriteShort(tile)
 	}
@@ -2948,17 +2985,59 @@ func (p *Player) msgPLI_BOARDMODIFY(packet []byte) bool {
 	for i := 0; i < int(tileCount); i++ {
 		tiles[i] = buf.ReadShort()
 	}
-	if level, ok := p.server.levels[p.levelName]; ok {
-		change := LevelBoardChange{x: int(x), y: int(y), width: int(width), height: int(height), newTiles: shortsToBytes(tiles), time: time.Now()}
-		level.boardChanges = append(level.boardChanges, change)
-		for _, plId := range level.players {
-			if pl, ok := p.server.players[plId]; ok && pl.conn != nil {
-				pl.sendPBoardPacket(int16(x), int16(y), int16(width), int16(height), tiles)
-			}
+	if level := p.getCurrentLevel(); level != nil {
+		oldTile := level.getTileAt(int(x), int(y))
+		if level.alterBoard(p.server, int(x), int(y), int(width), int(height), tiles) {
+			p.server.broadcastBoardModify(level, int16(x), int16(y), int16(width), int16(height), tiles)
+			p.maybeDropTileItem(level, int(x), int(y), oldTile)
 		}
 	}
 	return true
 }
+
+func (p *Player) getCurrentLevel() *Level {
+	if p.currentLevel != nil {
+		return p.currentLevel
+	}
+	if p.server == nil || p.levelName == "" {
+		return nil
+	}
+	if level := p.server.GetLevel(p.levelName); level != nil {
+		return level
+	}
+	return p.server.GetLevel(cleanLevelName(p.levelName))
+}
+
+func (p *Player) maybeDropTileItem(level *Level, x, y int, oldTile int16) {
+	if level == nil || p.server == nil || x < 0 || x > 63 || y < 0 || y > 63 {
+		return
+	}
+	if p.versionId > 0 && p.versionId < 210 {
+		return
+	}
+	itemType := LevelItemType(-1)
+	switch oldTile {
+	case 2, 0x1a4, 0x1ff, 0x3ff:
+		if !p.server.settings.GetBool("bushitems", true) {
+			return
+		}
+		dropRate := p.server.settings.GetInt("tiledroprate", 50)
+		if dropRate <= 0 || rand.Intn(100) >= dropRate {
+			return
+		}
+		itemType = LevelItemType(rand.Intn(6))
+	case 0x2ac:
+		if !p.server.settings.GetBool("vasesdrop", true) {
+			return
+		}
+		itemType = ItemHeart
+	default:
+		return
+	}
+	level.addItem(float32(x), float32(y), itemType)
+	p.server.broadcastItemAdd(level, int16(x*2), int16(y*2), int(itemType))
+}
+
 func (p *Player) msgPLI_REQUESTUPDATEBOARD(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	levelName := buf.ReadGCharString()
@@ -3175,8 +3254,9 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 	p.server.logger.Debug("msgPLI_PLAYERPROPS: Processing %d bytes from %s", len(packet), p.accountName)
 	p.server.logger.Debug("msgPLI_PLAYERPROPS: Raw packet bytes: % X", packet)
 	buf := NewBufferFromBytes(packet[1:])
-	levelBuff := NewBuffer()
-	compatBuff := NewBuffer()
+	commonBuff := NewBuffer()
+	legacyMoveBuff := NewBuffer()
+	preciseMoveBuff := NewBuffer()
 	for buf.BytesLeft() > 0 {
 		propId := buf.ReadGChar()
 		p.server.logger.Debug("msgPLI_PLAYERPROPS: propId=%d", propId)
@@ -3323,46 +3403,90 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 			p.server.logger.Debug("msgPLI_PLAYERPROPS: unhandled propId=%d, stopping to avoid stream desync", propId)
 			return true
 		}
-		p.appendPlayerPropDelta(int(propId), levelBuff, compatBuff)
+		p.appendPlayerPropDelta(int(propId), commonBuff, legacyMoveBuff, preciseMoveBuff)
 	}
-	if p.isLoggedIn() && p.loaded && (levelBuff.Len() > 0 || compatBuff.Len() > 0) {
-		out := NewBuffer()
-		out.WriteByte(PLO_OTHERPLPROPS).WriteGShort(p.id)
-		out.Write(levelBuff.Bytes())
-		out.Write(compatBuff.Bytes())
-		p.server.logger.Debug("msgPLI_PLAYERPROPS: Forwarding %d changed prop bytes to level %s", out.Len(), p.levelName)
-		p.sendToCurrentLevelExceptSelf(out.Bytes())
+	if p.isLoggedIn() && p.loaded && (commonBuff.Len() > 0 || legacyMoveBuff.Len() > 0 || preciseMoveBuff.Len() > 0) {
+		p.server.logger.Debug("msgPLI_PLAYERPROPS: Forwarding changed props common=%d legacyMove=%d preciseMove=%d to level %s", commonBuff.Len(), legacyMoveBuff.Len(), preciseMoveBuff.Len(), p.levelName)
+		p.sendPlayerPropDeltasToCurrentLevel(commonBuff.Bytes(), legacyMoveBuff.Bytes(), preciseMoveBuff.Bytes())
 	}
 	p.server.logger.Debug("msgPLI_PLAYERPROPS: Done processing")
 	return true
 }
 
-func (p *Player) appendPlayerPropDelta(propId int, levelBuff, compatBuff *Buffer) {
+func (p *Player) appendPlayerPropDelta(propId int, commonBuff, legacyMoveBuff, preciseMoveBuff *Buffer) {
 	if propId < 0 || propId >= len(sendLocalProps) || !sendLocalProps[propId] {
 		return
 	}
-	levelBuff.WriteGChar(byte(propId))
-	levelBuff.Write(p.getProp(propId))
 	switch propId {
 	case PLPROP_X:
-		compatBuff.WriteGChar(PLPROP_X2)
-		compatBuff.Write(p.getProp(PLPROP_X2))
+		legacyMoveBuff.WriteGChar(PLPROP_X)
+		legacyMoveBuff.Write(p.getProp(PLPROP_X))
+		preciseMoveBuff.WriteGChar(PLPROP_X2)
+		preciseMoveBuff.Write(p.getProp(PLPROP_X2))
 	case PLPROP_Y:
-		compatBuff.WriteGChar(PLPROP_Y2)
-		compatBuff.Write(p.getProp(PLPROP_Y2))
+		legacyMoveBuff.WriteGChar(PLPROP_Y)
+		legacyMoveBuff.Write(p.getProp(PLPROP_Y))
+		preciseMoveBuff.WriteGChar(PLPROP_Y2)
+		preciseMoveBuff.Write(p.getProp(PLPROP_Y2))
 	case PLPROP_Z:
-		compatBuff.WriteGChar(PLPROP_Z2)
-		compatBuff.Write(p.getProp(PLPROP_Z2))
+		legacyMoveBuff.WriteGChar(PLPROP_Z)
+		legacyMoveBuff.Write(p.getProp(PLPROP_Z))
+		preciseMoveBuff.WriteGChar(PLPROP_Z2)
+		preciseMoveBuff.Write(p.getProp(PLPROP_Z2))
 	case PLPROP_X2:
-		compatBuff.WriteGChar(PLPROP_X)
-		compatBuff.Write(p.getProp(PLPROP_X))
+		preciseMoveBuff.WriteGChar(PLPROP_X2)
+		preciseMoveBuff.Write(p.getProp(PLPROP_X2))
+		legacyMoveBuff.WriteGChar(PLPROP_X)
+		legacyMoveBuff.Write(p.getProp(PLPROP_X))
 	case PLPROP_Y2:
-		compatBuff.WriteGChar(PLPROP_Y)
-		compatBuff.Write(p.getProp(PLPROP_Y))
+		preciseMoveBuff.WriteGChar(PLPROP_Y2)
+		preciseMoveBuff.Write(p.getProp(PLPROP_Y2))
+		legacyMoveBuff.WriteGChar(PLPROP_Y)
+		legacyMoveBuff.Write(p.getProp(PLPROP_Y))
 	case PLPROP_Z2:
-		compatBuff.WriteGChar(PLPROP_Z)
-		compatBuff.Write(p.getProp(PLPROP_Z))
+		preciseMoveBuff.WriteGChar(PLPROP_Z2)
+		preciseMoveBuff.Write(p.getProp(PLPROP_Z2))
+		legacyMoveBuff.WriteGChar(PLPROP_Z)
+		legacyMoveBuff.Write(p.getProp(PLPROP_Z))
+	default:
+		commonBuff.WriteGChar(byte(propId))
+		commonBuff.Write(p.getProp(propId))
 	}
+}
+
+func (p *Player) sendPlayerPropDeltasToCurrentLevel(common, legacyMove, preciseMove []byte) {
+	level := p.currentLevel
+	if level == nil && p.server != nil && p.levelName != "" {
+		level = p.server.GetLevel(cleanLevelName(p.levelName))
+	}
+	if level == nil || p.server == nil {
+		return
+	}
+	for _, plId := range level.getPlayers() {
+		if plId == p.id {
+			continue
+		}
+		pl, ok := p.server.players[plId]
+		if !ok || pl == nil || pl.conn == nil {
+			continue
+		}
+		moveProps := legacyMove
+		if playerSupportsPreciseMovement(pl) {
+			moveProps = preciseMove
+		}
+		if len(common) == 0 && len(moveProps) == 0 {
+			continue
+		}
+		out := NewBuffer()
+		out.WriteByte(PLO_OTHERPLPROPS).WriteGShort(p.id)
+		out.Write(common)
+		out.Write(moveProps)
+		pl.sendPacket(append(out.Bytes(), '\n'))
+	}
+}
+
+func playerSupportsPreciseMovement(p *Player) bool {
+	return p != nil && p.versionId >= 230
 }
 
 func (p *Player) readPlayerPowerImageProp(sword bool, buf *Buffer) {
@@ -3654,7 +3778,7 @@ func (p *Player) msgPLI_WANTFILE(packet []byte) bool {
 func (p *Player) msgPLI_SHOWIMG(packet []byte) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_SHOWIMG).WriteGShort(p.id).Write(packet[1:])
-	p.send(buf)
+	p.sendToCurrentLevelExceptSelf(buf.Bytes())
 	return true
 }
 func (p *Player) msgPLI_HURTPLAYER(packet []byte) bool {
@@ -6259,7 +6383,11 @@ type LevelBoardChange struct {
 }
 
 func NewLevelBoardChange(x, y, width, height int, newTiles []byte, oldTiles []byte, respawn time.Duration) *LevelBoardChange {
-	return &LevelBoardChange{x: x, y: y, width: width, height: height, newTiles: newTiles, oldTiles: oldTiles, timeout: time.Now().Add(respawn), time: time.Now()}
+	change := &LevelBoardChange{x: x, y: y, width: width, height: height, newTiles: newTiles, oldTiles: oldTiles, time: time.Now()}
+	if respawn >= 0 {
+		change.timeout = time.Now().Add(respawn)
+	}
+	return change
 }
 
 func (lbc *LevelBoardChange) GetBoardStr() []byte {
@@ -6989,6 +7117,8 @@ func (l *Level) getBoardPacket() []byte {
 	return buf.Bytes()
 }
 func (l *Level) getTileAt(x, y int) int16 {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	if x < 0 || x >= 64 || y < 0 || y >= 64 {
 		return 0
 	}
@@ -6998,6 +7128,12 @@ func (l *Level) getTileAt(x, y int) int16 {
 	return 0
 }
 func (l *Level) setTileAt(x, y int, tile int16) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.setTileAtLocked(x, y, tile)
+}
+
+func (l *Level) setTileAtLocked(x, y int, tile int16) {
 	if x < 0 || x >= 64 || y < 0 || y >= 64 {
 		return
 	}
@@ -7006,6 +7142,96 @@ func (l *Level) setTileAt(x, y int, tile int16) {
 	}
 	if len(l.tiles[0].tiles) == 4096 {
 		l.tiles[0].tiles[x+y*64] = tile
+	}
+}
+
+func (l *Level) alterBoard(server *Server, x, y, width, height int, tiles []int16) bool {
+	if x < 0 || y < 0 || width <= 0 || height <= 0 || x+width > 64 || y+height > 64 || len(tiles) < width*height {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.tiles[0] == nil {
+		l.tiles[0] = &LevelTiles{tiles: make([]int16, 4096)}
+	}
+	oldTiles := make([]int16, 0, width*height)
+	for yy := 0; yy < height; yy++ {
+		for xx := 0; xx < width; xx++ {
+			oldTiles = append(oldTiles, l.tiles[0].tiles[(x+xx)+(y+yy)*64])
+		}
+	}
+	for i := len(l.boardChanges) - 1; i >= 0; i-- {
+		change := l.boardChanges[i]
+		if change.x >= x && change.x+change.width <= x+width && change.y >= y && change.y+change.height <= y+height {
+			l.boardChanges = append(l.boardChanges[:i], l.boardChanges[i+1:]...)
+		}
+	}
+	idx := 0
+	for yy := 0; yy < height; yy++ {
+		for xx := 0; xx < width; xx++ {
+			l.setTileAtLocked(x+xx, y+yy, tiles[idx])
+			idx++
+		}
+	}
+	oldTile := int16(0)
+	if len(oldTiles) > 0 {
+		oldTile = oldTiles[0]
+	}
+	respawnDuration := time.Duration(-1)
+	if isRespawningTile(oldTile) {
+		respawnSeconds := 15
+		if server != nil && server.settings != nil {
+			respawnSeconds = server.settings.GetInt("respawntime", 15)
+		}
+		respawnDuration = time.Duration(respawnSeconds) * time.Second
+	}
+	change := NewLevelBoardChange(x, y, width, height, shortsToBytes(tiles[:width*height]), shortsToBytes(oldTiles), respawnDuration)
+	l.boardChanges = append(l.boardChanges, *change)
+	return true
+}
+
+func (l *Level) processBoardRespawns(server *Server) {
+	l.mu.Lock()
+	var respawns []LevelBoardChange
+	now := time.Now()
+	for i := 0; i < len(l.boardChanges); {
+		change := l.boardChanges[i]
+		if !change.timeout.IsZero() && !now.Before(change.timeout) && len(change.oldTiles) > 0 {
+			oldTiles := bytesToShorts(change.oldTiles)
+			idx := 0
+			for yy := 0; yy < change.height; yy++ {
+				for xx := 0; xx < change.width && idx < len(oldTiles); xx++ {
+					l.setTileAtLocked(change.x+xx, change.y+yy, oldTiles[idx])
+					idx++
+				}
+			}
+			respawns = append(respawns, LevelBoardChange{x: change.x, y: change.y, width: change.width, height: change.height, newTiles: change.oldTiles, time: now})
+			l.boardChanges = append(l.boardChanges[:i], l.boardChanges[i+1:]...)
+			continue
+		}
+		i++
+	}
+	l.mu.Unlock()
+	for _, change := range respawns {
+		server.broadcastBoardModify(l, int16(change.x), int16(change.y), int16(change.width), int16(change.height), bytesToShorts(change.newTiles))
+	}
+}
+
+func (l *Level) addItem(x, y float32, itemType LevelItemType) {
+	if getItemName(itemType) == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.items = append(l.items, LevelItem{x: x, y: y, itemType: itemType})
+}
+
+func isRespawningTile(tile int16) bool {
+	switch tile {
+	case 2, 0x1a4, 0x1ff, 0x2ac, 0x3ff:
+		return true
+	default:
+		return false
 	}
 }
 

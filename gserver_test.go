@@ -807,7 +807,7 @@ func TestLevelWarpParsesRestOfPacketAsLevelName(t *testing.T) {
 func TestBoardModifyUsesGCharRegionHeader(t *testing.T) {
 	level := NewLevel()
 	p := &Player{
-		server: &Server{logger: NewLogger("", false), levels: map[string]*Level{"onlinestartlocal.nw": level}},
+		server: &Server{logger: NewLogger("", false), settings: NewSettings(), levels: map[string]*Level{"onlinestartlocal.nw": level}},
 	}
 	p.levelName = "onlinestartlocal.nw"
 
@@ -832,6 +832,119 @@ func TestBoardModifyUsesGCharRegionHeader(t *testing.T) {
 	}
 	if len(change.newTiles) != 2 || change.newTiles[0] != 0x12 || change.newTiles[1] != 0x34 {
 		t.Fatalf("change tiles = % X, want 12 34", change.newTiles)
+	}
+}
+
+func TestBoardModifyBroadcastsAndDropsBushItem(t *testing.T) {
+	settings := NewSettings()
+	settings.Set("bushitems", "true")
+	settings.Set("tiledroprate", "100")
+	settings.Set("respawntime", "15")
+	level := NewLevel()
+	level.setTileAt(2, 3, 2)
+	server := &Server{
+		logger:   NewLogger("", false),
+		settings: settings,
+		players:  make(map[uint16]*Player),
+		levels:   map[string]*Level{"onlinestartlocal.nw": level},
+	}
+	p := &Player{id: 1, server: server, currentLevel: level, playerType: PLTYPE_CLIENT3, versionId: 222}
+	p.levelName = "onlinestartlocal.nw"
+	other := &Player{id: 2, server: server, currentLevel: level, playerType: PLTYPE_CLIENT3, queueOutgoing: true}
+	other.conn, _ = net.Pipe()
+	defer other.conn.Close()
+	server.players[p.id] = p
+	server.players[other.id] = other
+	level.players = []uint16{p.id, other.id}
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_BOARDMODIFY)
+	packet.WriteGChar(2).WriteGChar(3).WriteGChar(1).WriteGChar(1)
+	packet.WriteShort(0)
+
+	if !p.msgPLI_BOARDMODIFY(packet.Bytes()) {
+		t.Fatalf("msgPLI_BOARDMODIFY returned false")
+	}
+	if level.getTileAt(2, 3) != 0 {
+		t.Fatalf("tile did not change to 0")
+	}
+	boardModify := []byte{PLO_BOARDMODIFY + 32, 2 + 32, 3 + 32, 1 + 32, 1 + 32, 0, 0, '\n'}
+	if !bytes.Contains(other.outQueue, boardModify) {
+		t.Fatalf("observer did not receive board modify % X in % X", boardModify, other.outQueue)
+	}
+	if !bytes.Contains(other.outQueue, []byte{PLO_ITEMADD + 32}) {
+		t.Fatalf("observer did not receive item drop: % X", other.outQueue)
+	}
+	if len(level.items) != 1 {
+		t.Fatalf("level items = %d, want 1", len(level.items))
+	}
+}
+
+func TestBoardModifyUsesCurrentLevelWhenNameLookupMisses(t *testing.T) {
+	settings := NewSettings()
+	level := NewLevel()
+	level.setTileAt(2, 3, 2)
+	server := &Server{
+		logger:   NewLogger("", false),
+		settings: settings,
+		players:  make(map[uint16]*Player),
+		levels:   map[string]*Level{},
+	}
+	p := &Player{id: 1, server: server, currentLevel: level, playerType: PLTYPE_CLIENT3, versionId: 222}
+	p.levelName = "onlinestartlocal.nw"
+	otherConn, otherPeer := net.Pipe()
+	defer otherConn.Close()
+	defer otherPeer.Close()
+	other := &Player{id: 2, conn: otherConn, server: server, currentLevel: level, playerType: PLTYPE_CLIENT3, queueOutgoing: true}
+	server.players[p.id] = p
+	server.players[other.id] = other
+	level.players = []uint16{p.id, other.id}
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_BOARDMODIFY)
+	packet.WriteGChar(2).WriteGChar(3).WriteGChar(1).WriteGChar(1)
+	packet.WriteShort(0)
+
+	if !p.msgPLI_BOARDMODIFY(packet.Bytes()) {
+		t.Fatalf("msgPLI_BOARDMODIFY returned false")
+	}
+	if level.getTileAt(2, 3) != 0 {
+		t.Fatalf("tile did not change through currentLevel fallback")
+	}
+	boardModify := []byte{PLO_BOARDMODIFY + 32, 2 + 32, 3 + 32, 1 + 32, 1 + 32, 0, 0, '\n'}
+	if !bytes.Contains(other.outQueue, boardModify) {
+		t.Fatalf("observer did not receive board modify via currentLevel % X in % X", boardModify, other.outQueue)
+	}
+}
+
+func TestBoardModifyRespawnsOldTile(t *testing.T) {
+	settings := NewSettings()
+	settings.Set("respawntime", "0")
+	level := NewLevel()
+	level.setTileAt(2, 3, 2)
+	server := &Server{
+		logger:   NewLogger("", false),
+		settings: settings,
+		players:  make(map[uint16]*Player),
+		levels:   map[string]*Level{"onlinestartlocal.nw": level},
+	}
+	observer := &Player{id: 2, server: server, currentLevel: level, playerType: PLTYPE_CLIENT3, queueOutgoing: true}
+	observer.conn, _ = net.Pipe()
+	defer observer.conn.Close()
+	server.players[observer.id] = observer
+	level.players = []uint16{observer.id}
+
+	if !level.alterBoard(server, 2, 3, 1, 1, []int16{0}) {
+		t.Fatalf("alterBoard returned false")
+	}
+	level.processBoardRespawns(server)
+
+	if level.getTileAt(2, 3) != 2 {
+		t.Fatalf("tile did not respawn to 2")
+	}
+	respawnPacket := []byte{PLO_BOARDMODIFY + 32, 2 + 32, 3 + 32, 1 + 32, 1 + 32, 0, 2, '\n'}
+	if !bytes.Contains(observer.outQueue, respawnPacket) {
+		t.Fatalf("observer did not receive respawn packet % X in % X", respawnPacket, observer.outQueue)
 	}
 }
 
@@ -1263,6 +1376,7 @@ func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
 		server:       server,
 		currentLevel: level,
 		playerType:   PLTYPE_CLIENT3,
+		versionId:    222,
 		encryption:   *NewEncryption(),
 	}
 	other.levelName = "onlinestartlocal.nw"
@@ -1294,6 +1408,73 @@ func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
 	want = append(want, []byte("hi")...)
 	want = append(want, PLPROP_PSTATUSMSG+32, 7+32)
 	want = append(want, PLPROP_X+32, 64+32, PLPROP_Y+32, 65+32)
+	want = append(want, '\n')
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read other player prop delta: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("other player prop delta = % X, want % X", got, want)
+	}
+}
+
+func TestPlayerPropsForwardPreciseMovementToModernPlayers(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	level := NewLevel()
+	level.levelName = "onlinestartlocal.nw"
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+		levels:  map[string]*Level{"onlinestartlocal": level},
+	}
+	p := &Player{
+		id:           1,
+		server:       server,
+		currentLevel: level,
+		playerType:   PLTYPE_CLIENT3,
+		versionId:    300,
+		loaded:       true,
+	}
+	p.levelName = "onlinestartlocal.nw"
+	other := &Player{
+		id:           2,
+		conn:         serverConn,
+		server:       server,
+		currentLevel: level,
+		playerType:   PLTYPE_CLIENT3,
+		versionId:    300,
+		encryption:   *NewEncryption(),
+	}
+	other.levelName = "onlinestartlocal.nw"
+	other.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[p.id] = p
+	server.players[other.id] = other
+	level.players = []uint16{p.id, other.id}
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_PLAYERPROPS)
+	packet.WriteGChar(PLPROP_GANI).WriteGChar(4).Write([]byte("walk"))
+	packet.WriteGChar(PLPROP_X2).WriteGShort(64 * 8 * 2)
+	packet.WriteGChar(PLPROP_Y2).WriteGShort(65 * 8 * 2)
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.msgPLI_PLAYERPROPS(packet.Bytes())
+		done <- struct{}{}
+	}()
+
+	id := NewBuffer()
+	id.WriteGShort(p.id)
+	want := append([]byte{PLO_OTHERPLPROPS + 32}, id.Bytes()...)
+	want = append(want, PLPROP_GANI+32, 4+32)
+	want = append(want, []byte("walk")...)
 	wantX2 := NewBuffer()
 	wantX2.WriteGShort(64 * 8 * 2)
 	wantY2 := NewBuffer()
@@ -1307,12 +1488,12 @@ func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))
 	got := make([]byte, len(want))
 	if _, err := io.ReadFull(clientConn, got); err != nil {
-		t.Fatalf("read other player prop delta: %v", err)
+		t.Fatalf("read modern player prop delta: %v", err)
 	}
 	<-done
 
 	if string(got) != string(want) {
-		t.Fatalf("other player prop delta = % X, want % X", got, want)
+		t.Fatalf("modern player prop delta = % X, want % X", got, want)
 	}
 }
 
@@ -1744,13 +1925,29 @@ func TestShowImgForwardsRawBodyWithPlayerId(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
+	level := NewLevel()
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
 	p := &Player{
+		server:       server,
+		currentLevel: level,
+		encryption:   *NewEncryption(),
+		id:           7,
+	}
+	other := &Player{
 		conn:       serverConn,
-		server:     &Server{logger: NewLogger("", false)},
+		server:     server,
 		encryption: *NewEncryption(),
-		id:         7,
+		id:         8,
 	}
 	p.encryption.SetGen(ENCRYPT_GEN_1)
+	other.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[p.id] = p
+	server.players[other.id] = other
+	level.addPlayer(p)
+	level.addPlayer(other)
 
 	body := []byte{0x21, 0x22, 'i', 'm', 'g'}
 	done := make(chan struct{}, 1)
