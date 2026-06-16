@@ -52,6 +52,16 @@ func TestLoadSettingsControlsPacketDebugSeparately(t *testing.T) {
 	}
 }
 
+func TestNewServerCreatesNPCServerRuntime(t *testing.T) {
+	server := NewServer("Test")
+	if server.npcServer == nil {
+		t.Fatal("NewServer did not initialize npc-server runtime")
+	}
+	if server.npcServer.host != server {
+		t.Fatalf("npc-server runtime host = %#v, want server", server.npcServer.host)
+	}
+}
+
 func TestLoadSettingsSyncsNPCServerPlayer(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")

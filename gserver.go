@@ -63,6 +63,7 @@ type Server struct {
 	flags           map[string]string
 	flagMu          sync.RWMutex
 	serverList      *ServerList
+	npcServer       *NPCServer
 	triggerCommands map[string]func(*Player, []string) bool
 	serverMessage   string
 	serverTime      uint
@@ -86,6 +87,7 @@ func NewServer(name string) *Server {
 		shutdown: make(chan struct{}),
 	}
 	s.serverList = NewServerList(s)
+	s.npcServer = NewNPCServer(s)
 	s.triggerCommands = make(map[string]func(*Player, []string) bool)
 	s.initTriggerCommands()
 	s.wordFilter = &WordFilter{server: s}
@@ -1723,34 +1725,11 @@ func (p *Player) sendNCPostLoginTail() {
 }
 
 func (p *Player) sendNCNPCList() {
-	p.server.npcMu.RLock()
-	npcs := make([]*NPC, 0, len(p.server.npcs))
-	for _, npc := range p.server.npcs {
-		if npc != nil && npc.npcType == DBNPC {
-			npcs = append(npcs, npc)
-		}
-	}
-	p.server.npcMu.RUnlock()
-	for _, npc := range npcs {
-		p.sendNCNPCAdd(npc)
-	}
+	p.server.ensureNPCServer().SendNPCList(p)
 }
 
 func (p *Player) sendNCNPCAdd(npc *NPC) {
-	levelName := ""
-	if npc.level != nil {
-		levelName = npc.level.levelName
-	}
-	buf := NewBuffer()
-	buf.WriteByte(PLO_NC_NPCADD)
-	buf.WriteGInt(npc.id)
-	buf.WriteByte(byte(NPCPROP_NAME))
-	buf.WriteGString(npc.npcName)
-	buf.WriteByte(byte(NPCPROP_TYPE))
-	buf.WriteGString(npc.scriptType)
-	buf.WriteByte(byte(NPCPROP_CURLEVEL))
-	buf.WriteGString(levelName)
-	p.send(buf)
+	p.server.ensureNPCServer().SendNPCAdd(p, npc)
 }
 
 func (p *Player) sendNCClassList() {
