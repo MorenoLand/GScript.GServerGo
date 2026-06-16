@@ -4399,10 +4399,13 @@ func (p *Player) msgPLI_RC_SERVEROPTIONSGET(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted SERVEROPTIONSGET (non-RC)", p.accountName)
 		return true
 	}
-	settings := p.server.settings.GetAll()
-	var settingsStr string
-	for key, value := range settings {
-		settingsStr += key + "=" + value + "\n"
+	settingsData, err := p.server.config.LoadFile("config/serveroptions.txt")
+	settingsStr := string(settingsData)
+	if err != nil {
+		settings := p.server.settings.GetAll()
+		for key, value := range settings {
+			settingsStr += key + "=" + value + "\n"
+		}
 	}
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RC_SERVEROPTIONSGET)
@@ -4455,7 +4458,13 @@ func (p *Player) msgPLI_RC_SERVEROPTIONSSET(packet []byte) bool {
 		options = strings.Join(filteredOptions, "\n")
 	}
 	p.server.settings.LoadFromString(options)
-	p.server.settings.Save("config/serveroptions.txt")
+	if !strings.HasSuffix(options, "\n") {
+		options += "\n"
+	}
+	if err := p.server.config.SaveFile("config/serveroptions.txt", []byte(options)); err != nil {
+		p.server.logger.Error("Failed to save serveroptions.txt: %v", err)
+		return true
+	}
 	p.server.loadSettings()
 	p.server.logger.Info("%s has updated the server options.", p.accountName)
 	p.server.sendRCChat(p.accountName + " has updated the server options.")

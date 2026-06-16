@@ -164,8 +164,14 @@ func TestRCChatRelaysToConnectedRCs(t *testing.T) {
 
 func TestRCServerOptionsGetSendsTokenizedConfigAsSinglePacket(t *testing.T) {
 	server := newLoginTestServer(t)
-	server.settings.Set("name", "Orion-Go")
-	server.settings.Set("staff", "(Manager),moondeath")
+	configDir := filepath.Join(server.config.GetBasePath(), "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	optionsText := "# Server Options\n\nname = Orion-Go\nstaff = (Manager),moondeath\n"
+	if err := os.WriteFile(filepath.Join(configDir, "serveroptions.txt"), []byte(optionsText), 0644); err != nil {
+		t.Fatalf("write serveroptions: %v", err)
+	}
 	rc := NewPlayer(nil, server)
 	rc.playerType = PLTYPE_RC2
 	rc.queueOutgoing = true
@@ -180,8 +186,40 @@ func TestRCServerOptionsGetSendsTokenizedConfigAsSinglePacket(t *testing.T) {
 	if bytes.ContainsAny(payload, "\x01\n\r") {
 		t.Fatalf("serveroptions payload contained packet-breaking separators: % X", rc.outQueue)
 	}
-	if !bytes.Contains(payload, []byte("name=Orion-Go")) || !bytes.Contains(payload, []byte("\"staff=(Manager),moondeath\"")) {
+	if !bytes.Contains(payload, []byte("\"# Server Options\"")) || !bytes.Contains(payload, []byte("\"\"")) ||
+		!bytes.Contains(payload, []byte("\"name = Orion-Go\"")) || !bytes.Contains(payload, []byte("\"staff = (Manager),moondeath\"")) {
 		t.Fatalf("serveroptions payload missing tokenized lines: %q", payload)
+	}
+}
+
+func TestRCServerOptionsSetPreservesCommentsAndBlankLinesForFullRights(t *testing.T) {
+	server := newLoginTestServer(t)
+	configDir := filepath.Join(server.config.GetBasePath(), "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.id = 2
+	rc.accountName = "Admin"
+	rc.adminRights = allLocalRights()
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
+
+	optionsText := "# Server Options\n\nname = Orion-Go\nstaff = (Manager),moondeath\n"
+	packet := append([]byte{PLI_RC_SERVEROPTIONSSET}, []byte(gtokenizeText(optionsText))...)
+	rc.msgPLI_RC_SERVEROPTIONSSET(packet)
+
+	saved, err := os.ReadFile(filepath.Join(configDir, "serveroptions.txt"))
+	if err != nil {
+		t.Fatalf("read saved serveroptions: %v", err)
+	}
+	want := strings.TrimSuffix(optionsText, "\n") + "\n"
+	if string(saved) != want {
+		t.Fatalf("saved serveroptions = %q, want %q", saved, want)
+	}
+	if got := server.settings.Get("name"); got != "Orion-Go" {
+		t.Fatalf("reloaded setting name = %q", got)
 	}
 }
 
