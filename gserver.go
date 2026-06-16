@@ -7434,7 +7434,11 @@ func getItemPlayerProp(itemType LevelItemType, player *Player) []byte {
 		buf.WriteGChar(PLPROP_CURPOWER)
 		buf.WriteGChar(byte(heartMax * 2))
 	case ItemSpinattack:
-		return nil
+		if player.status&PLSTATUS_HASSPIN != 0 {
+			return nil
+		}
+		buf.WriteGChar(PLPROP_STATUS)
+		buf.WriteGChar(byte(player.status | PLSTATUS_HASSPIN))
 	}
 	return buf.Bytes()
 }

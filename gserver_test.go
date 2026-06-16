@@ -2719,6 +2719,58 @@ func TestOpenChestAwardsOnceAndPersistsChest(t *testing.T) {
 	}
 }
 
+func TestOpenChestSpinAttackSetsStatusFlag(t *testing.T) {
+	dir := t.TempDir()
+	level := NewLevel()
+	level.levelName = "onlinestartlocal.nw"
+	chest := &LevelChest{x: 20, y: 24, itemType: ItemSpinattack, signIndex: 0}
+	level.chests = []*LevelChest{chest}
+	server := &Server{
+		logger:  NewLogger("", false),
+		config:  NewFileSystem(dir),
+		players: make(map[uint16]*Player),
+		levels:  map[string]*Level{"onlinestartlocal.nw": level},
+	}
+	p := &Player{
+		id:            1,
+		server:        server,
+		currentLevel:  level,
+		playerType:    PLTYPE_CLIENT3,
+		loaded:        true,
+		queueOutgoing: true,
+	}
+	p.setServer(server)
+	p.accountName = "moondeath"
+	p.communityName = "moondeath"
+	p.levelName = "onlinestartlocal.nw"
+	p.character.nickName = "moondeath"
+	p.character.gani = "idle.gif"
+	p.flagList = make(map[string]string)
+	server.players[p.id] = p
+	level.players = []uint16{p.id}
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_OPENCHEST).WriteGChar(20).WriteGChar(24)
+
+	if !p.msgPLI_OPENCHEST(packet.Bytes()) {
+		t.Fatalf("msgPLI_OPENCHEST returned false")
+	}
+	if p.status&PLSTATUS_HASSPIN == 0 {
+		t.Fatalf("status = %#x, missing HASSPIN", p.status)
+	}
+	wantProps := []byte{PLO_PLAYERPROPS + 32, PLPROP_STATUS + 32, byte(PLSTATUS_HASSPIN) + 32, '\n'}
+	if !bytes.Contains(p.outQueue, wantProps) {
+		t.Fatalf("player did not receive spin status props % X in % X", wantProps, p.outQueue)
+	}
+	data, err := os.ReadFile(dir + "\\accounts\\moondeath.txt")
+	if err != nil {
+		t.Fatalf("read saved account: %v", err)
+	}
+	if !bytes.Contains(data, []byte("STATUS 64\r\n")) {
+		t.Fatalf("saved account missing spin status:\n%s", data)
+	}
+}
+
 func TestBoardModifyUsesCurrentLevelWhenNameLookupMisses(t *testing.T) {
 	settings := NewSettings()
 	level := NewLevel()
