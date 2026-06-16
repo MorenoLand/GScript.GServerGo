@@ -4987,6 +4987,54 @@ func TestHandlePacketAcceptsCommaRequestTextAndUpdateGani(t *testing.T) {
 	}
 }
 
+func TestSparsePLIPacketConstantsMatchProtocolIDs(t *testing.T) {
+	tests := map[string]int{
+		"PLI_RC_FILEBROWSER_MOVE":      PLI_RC_FILEBROWSER_MOVE,
+		"PLI_RC_FILEBROWSER_DELETE":    PLI_RC_FILEBROWSER_DELETE,
+		"PLI_RC_FILEBROWSER_RENAME":    PLI_RC_FILEBROWSER_RENAME,
+		"PLI_NC_LISTNPCS":              PLI_NC_LISTNPCS,
+		"PLI_NC_NPCGET":                PLI_NC_NPCGET,
+		"PLI_REQUESTUPDATEBOARD":       PLI_REQUESTUPDATEBOARD,
+		"PLI_NC_LEVELLISTGET":          PLI_NC_LEVELLISTGET,
+		"PLI_NC_LEVELLISTSET":          PLI_NC_LEVELLISTSET,
+		"PLI_REQUESTTEXT":              PLI_REQUESTTEXT,
+		"PLI_SENDTEXT":                 PLI_SENDTEXT,
+		"PLI_RC_LARGEFILESTART":        PLI_RC_LARGEFILESTART,
+		"PLI_RC_LARGEFILEEND":          PLI_RC_LARGEFILEEND,
+		"PLI_UPDATEGANI":               PLI_UPDATEGANI,
+		"PLI_UPDATESCRIPT":             PLI_UPDATESCRIPT,
+		"PLI_UPDATEPACKAGEREQUESTFILE": PLI_UPDATEPACKAGEREQUESTFILE,
+		"PLI_RC_FOLDERDELETE":          PLI_RC_FOLDERDELETE,
+		"PLI_UPDATECLASS":              PLI_UPDATECLASS,
+		"PLI_RC_UNKNOWN162":            PLI_RC_UNKNOWN162,
+	}
+	want := map[string]int{
+		"PLI_RC_FILEBROWSER_MOVE":      96,
+		"PLI_RC_FILEBROWSER_DELETE":    97,
+		"PLI_RC_FILEBROWSER_RENAME":    98,
+		"PLI_NC_LISTNPCS":              100,
+		"PLI_NC_NPCGET":                103,
+		"PLI_REQUESTUPDATEBOARD":       130,
+		"PLI_NC_LEVELLISTGET":          150,
+		"PLI_NC_LEVELLISTSET":          151,
+		"PLI_REQUESTTEXT":              152,
+		"PLI_SENDTEXT":                 154,
+		"PLI_RC_LARGEFILESTART":        155,
+		"PLI_RC_LARGEFILEEND":          156,
+		"PLI_UPDATEGANI":               157,
+		"PLI_UPDATESCRIPT":             158,
+		"PLI_UPDATEPACKAGEREQUESTFILE": 159,
+		"PLI_RC_FOLDERDELETE":          160,
+		"PLI_UPDATECLASS":              161,
+		"PLI_RC_UNKNOWN162":            162,
+	}
+	for name, got := range tests {
+		if got != want[name] {
+			t.Fatalf("%s = %d, want %d", name, got, want[name])
+		}
+	}
+}
+
 func TestUpdatePackageRequestSkipsPacketId(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "packages"), 0755); err != nil {
