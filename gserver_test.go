@@ -192,6 +192,23 @@ func TestPostLoginTailSendsListProcessesAfterStatusAndPlayerExchange(t *testing.
 	}
 }
 
+func TestPostLoginTailSkipsListProcessesForG3DClient(t *testing.T) {
+	p := &Player{
+		server:        &Server{logger: NewLogger("", false), settings: NewSettings(), players: make(map[uint16]*Player)},
+		playerType:    PLTYPE_CLIENT3,
+		versionId:     300,
+		queueOutgoing: true,
+		encryption:    *NewEncryption(),
+	}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+
+	p.sendPostLoginTail()
+
+	if bytes.Contains(p.outQueue, []byte{PLO_LISTPROCESSES + 32}) {
+		t.Fatalf("G3D client received legacy PLO_LISTPROCESSES: % X", p.outQueue)
+	}
+}
+
 func TestPostLoginTailExchangesAddPlayerAndOtherProps(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()
@@ -287,6 +304,200 @@ func TestDeletePlayerBroadcastsDelPlayer(t *testing.T) {
 	want = append(want, '\n')
 	if !bytes.Equal(other.outQueue, want) {
 		t.Fatalf("delete player broadcast = % X, want % X", other.outQueue, want)
+	}
+}
+
+func TestPlayerWriteFailureDisconnectsAndBroadcastsDelPlayer(t *testing.T) {
+	deadServer, deadClient := net.Pipe()
+	deadClient.Close()
+	defer deadServer.Close()
+
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
+	level := NewLevel()
+	dead := &Player{
+		conn:       deadServer,
+		server:     server,
+		id:         2,
+		playerType: PLTYPE_ANYCLIENT,
+		encryption: *NewEncryption(),
+	}
+	dead.levelName = "onlinestartlocal.nw"
+	dead.encryption.SetGen(ENCRYPT_GEN_1)
+	dead.currentLevel = level
+	observer := &Player{
+		server:        server,
+		id:            3,
+		playerType:    PLTYPE_ANYCLIENT,
+		queueOutgoing: true,
+		encryption:    *NewEncryption(),
+	}
+	observerServer, observerClient := net.Pipe()
+	defer observerServer.Close()
+	defer observerClient.Close()
+	observer.conn = observerServer
+	observer.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[dead.id] = dead
+	server.players[observer.id] = observer
+	level.addPlayer(dead)
+
+	dead.sendPacket([]byte{PLO_SIGNATURE, 73})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, exists := server.players[dead.id]; !exists {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, exists := server.players[dead.id]; exists {
+		t.Fatalf("dead player was not removed after write failure")
+	}
+	if got := level.getPlayers(); len(got) != 0 {
+		t.Fatalf("dead player still in level players: %v", got)
+	}
+	want := append([]byte{PLO_DELPLAYER + 32}, NewBuffer().WriteGShort(dead.id).Bytes()...)
+	want = append(want, '\n')
+	if !bytes.Equal(observer.outQueue, want) {
+		t.Fatalf("observer delplayer = % X, want % X", observer.outQueue, want)
+	}
+}
+
+func TestOnRecvReturnsFalseAfterDisconnectNilsConnection(t *testing.T) {
+	p := &Player{
+		server:       &Server{logger: NewLogger("", false)},
+		id:           2,
+		playerType:   PLTYPE_ANYCLIENT,
+		disconnected: true,
+	}
+
+	if p.OnRecv() {
+		t.Fatalf("OnRecv returned true for disconnected player with nil conn")
+	}
+}
+
+func TestLoadAllowedVersionsStripsCommentsAndWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir+"\\config", 0755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	data := "" +
+		"// List of version strings.\r\n" +
+		" GNW13110\t// 1.41r1\r\n" +
+		"GNW22122:GNW28015 // range\r\n" +
+		"\r\n" +
+		"G3D0311C  // 6.0.3.7\r\n"
+	if err := os.WriteFile(dir+"\\config\\allowedversions.txt", []byte(data), 0644); err != nil {
+		t.Fatalf("write allowedversions: %v", err)
+	}
+	server := &Server{logger: NewLogger("", false), config: NewFileSystem(dir)}
+
+	server.loadAllowedVersions()
+
+	want := "GNW13110,GNW22122:GNW28015,G3D0311C"
+	if got := server.allowedVersionsListserverText(); got != want {
+		t.Fatalf("allowedVersionsListserverText = %q, want %q", got, want)
+	}
+}
+
+func TestServerListSendsAllowedVersionsText(t *testing.T) {
+	server := &Server{
+		logger:          NewLogger("", false),
+		allowedVersions: []string{"GNW13110", "GNW22122:GNW28015", "G3D0311C"},
+	}
+	sl := &ServerList{
+		server:    server,
+		connected: true,
+		sendQueue: make(chan []byte, 1),
+		codec:     ENCRYPT_GEN_1,
+	}
+
+	sl.sendVersionConfig()
+
+	got := <-sl.sendQueue
+	wantText := "Listserver,settings,allowedversions,GNW13110,GNW22122:GNW28015,G3D0311C"
+	want := append([]byte{SVO_SENDTEXT + 32}, []byte(wantText)...)
+	want = append(want, '\n')
+	if !bytes.Equal(got, want) {
+		t.Fatalf("allowed versions packet = % X, want % X", got, want)
+	}
+}
+
+func TestServerListSendPacketUsesActiveCodec(t *testing.T) {
+	server := &Server{logger: NewLogger("", false)}
+	sl := &ServerList{
+		server:    server,
+		connected: true,
+		sendQueue: make(chan []byte, 1),
+		codec:     ENCRYPT_GEN_2,
+	}
+
+	buf := NewBuffer()
+	buf.WriteGChar(SVO_PING)
+	sl.SendPacket(buf.Bytes())
+
+	got := <-sl.sendQueue
+	if len(got) < 3 {
+		t.Fatalf("encoded packet too short: % X", got)
+	}
+	frameLen := int(got[0])<<8 | int(got[1])
+	if frameLen != len(got)-2 {
+		t.Fatalf("listserver frame len = %d, want %d", frameLen, len(got)-2)
+	}
+	plain, err := ZlibDecompress(got[2:])
+	if err != nil {
+		t.Fatalf("decompress ping packet: %v", err)
+	}
+	want := []byte{SVO_PING + 32, '\n'}
+	if !bytes.Equal(plain, want) {
+		t.Fatalf("decoded ping packet = % X, want % X", plain, want)
+	}
+}
+
+func TestServerListSendTextPacketEncodesIDAndUsesActiveCodec(t *testing.T) {
+	server := &Server{logger: NewLogger("", false)}
+	sl := &ServerList{
+		server:    server,
+		connected: true,
+		sendQueue: make(chan []byte, 1),
+		codec:     ENCRYPT_GEN_2,
+	}
+
+	sl.SendTextPacket(SVO_REQUESTLIST, "lister\x01pmservers\x01all")
+
+	got := <-sl.sendQueue
+	plain, err := ZlibDecompress(got[2:])
+	if err != nil {
+		t.Fatalf("decompress request list packet: %v", err)
+	}
+	want := append([]byte{SVO_REQUESTLIST + 32}, []byte("lister\x01pmservers\x01all")...)
+	want = append(want, '\n')
+	if !bytes.Equal(plain, want) {
+		t.Fatalf("decoded request list packet = % X, want % X", plain, want)
+	}
+}
+
+func TestServerListTimedEventsSendsSetIPKeepalive(t *testing.T) {
+	settings := NewSettings()
+	settings.Set("serverip", "AUTO")
+	server := &Server{logger: NewLogger("", false), settings: settings}
+	sl := &ServerList{
+		server:        server,
+		connected:     true,
+		sendQueue:     make(chan []byte, 1),
+		codec:         ENCRYPT_GEN_1,
+		lastKeepalive: time.Now().Add(-time.Minute),
+	}
+
+	sl.doTimedEvents()
+
+	got := <-sl.sendQueue
+	want := NewBuffer().WriteGChar(SVO_SETIP).WriteString8Encoded("AUTO").Bytes()
+	want = append(want, '\n')
+	if !bytes.Equal(got, want) {
+		t.Fatalf("keepalive packet = % X, want % X", got, want)
 	}
 }
 
@@ -960,6 +1171,7 @@ func TestPlayerPropsConsumesFullKnownPropertyStream(t *testing.T) {
 	packet.WriteGChar(PLPROP_TEXTCODEPAGE).WriteGInt(1252)
 	packet.WriteGChar(PLPROP_UNKNOWN81).WriteGChar(3)
 	packet.WriteGChar(PLPROP_CURCHAT).WriteGChar(5).Write([]byte("hello"))
+	packet.WriteGChar(PLPROP_PSTATUSMSG).WriteGChar(7)
 
 	if !p.msgPLI_PLAYERPROPS(packet.Bytes()) {
 		t.Fatalf("msgPLI_PLAYERPROPS returned false")
@@ -978,6 +1190,12 @@ func TestPlayerPropsConsumesFullKnownPropertyStream(t *testing.T) {
 	}
 	if p.character.chatMessage != "hello" {
 		t.Fatalf("chatMessage = %q, want hello", p.character.chatMessage)
+	}
+	if p.statusMsg != 7 {
+		t.Fatalf("statusMsg = %d, want 7", p.statusMsg)
+	}
+	if got := p.getProp(PLPROP_PSTATUSMSG); !bytes.Equal(got, []byte{7 + 32}) {
+		t.Fatalf("PSTATUSMSG prop = % X, want encoded status byte % X", got, []byte{7 + 32})
 	}
 }
 
@@ -1057,6 +1275,7 @@ func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
 	packet.WriteByte(PLI_PLAYERPROPS)
 	packet.WriteGChar(PLPROP_GANI).WriteGChar(4).Write([]byte("walk"))
 	packet.WriteGChar(PLPROP_CURCHAT).WriteGChar(2).Write([]byte("hi"))
+	packet.WriteGChar(PLPROP_PSTATUSMSG).WriteGChar(7)
 	packet.WriteGChar(PLPROP_X).WriteGChar(64)
 	packet.WriteGChar(PLPROP_Y).WriteGChar(65)
 
@@ -1073,6 +1292,7 @@ func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
 	want = append(want, []byte("walk")...)
 	want = append(want, PLPROP_CURCHAT+32, 2+32)
 	want = append(want, []byte("hi")...)
+	want = append(want, PLPROP_PSTATUSMSG+32, 7+32)
 	want = append(want, PLPROP_X+32, 64+32, PLPROP_Y+32, 65+32)
 	wantX2 := NewBuffer()
 	wantX2.WriteGShort(64 * 8 * 2)

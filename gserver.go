@@ -50,6 +50,7 @@ type Server struct {
 	players         map[uint16]*Player
 	playerMu        sync.RWMutex
 	playerIdGen     uint16
+	allowedVersions []string
 	levels          map[string]*Level
 	levelMu         sync.RWMutex
 	npcs            map[uint32]*NPC
@@ -262,7 +263,31 @@ func (s *Server) loadAdminSettings() {
 		s.logger.Error("Could not open config/adminconfig.txt. Will use default config.\n")
 	}
 }
-func (s *Server) loadAllowedVersions() {}
+func (s *Server) loadAllowedVersions() {
+	s.allowedVersions = s.allowedVersions[:0]
+	lines, err := s.config.LoadFileAsLines("config/allowedversions.txt")
+	if err != nil {
+		s.logger.Error("Could not open config/allowedversions.txt. No client version list will be sent to the listserver.")
+		return
+	}
+	for _, line := range lines {
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = line[:idx]
+		}
+		line = strings.ReplaceAll(line, "\r", "")
+		line = strings.ReplaceAll(line, "\t", "")
+		line = strings.ReplaceAll(line, " ", "")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		s.allowedVersions = append(s.allowedVersions, line)
+	}
+}
+
+func (s *Server) allowedVersionsListserverText() string {
+	return strings.Join(s.allowedVersions, ",")
+}
 func (s *Server) loadFileSystem() {
 	if s.settings.GetBool("nofoldersconfig", false) {
 		return
@@ -857,7 +882,7 @@ type Account struct {
 	onlineTime, status, udpport                                                                  int
 	lastSparTime                                                                                 time.Time
 	attachNPC                                                                                    uint32
-	statusMsg                                                                                    string
+	statusMsg                                                                                    uint8
 	gAttribs                                                                                     [30]string
 	os                                                                                           string
 	envCodePage                                                                                  int
@@ -1234,18 +1259,25 @@ func (p *Player) CanRecv() bool    { return true }
 func (p *Player) CanSend() bool    { return len(p.recvBuffer) > 0 }
 
 func (p *Player) OnRecv() bool {
+	p.mu.Lock()
+	conn := p.conn
+	disconnected := p.disconnected
+	p.mu.Unlock()
+	if disconnected || conn == nil {
+		return false
+	}
 	if !p.isLoggedIn() {
-		p.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	} else {
-		p.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	}
 	buf := make([]byte, 4096)
-	n, err := p.conn.Read(buf)
+	n, err := conn.Read(buf)
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return true
 		}
-		p.server.logger.Debug("OnRecv: read error from %s before loggedIn=%v: %v", p.conn.RemoteAddr(), p.isLoggedIn(), err)
+		p.server.logger.Debug("OnRecv: read error from %s before loggedIn=%v: %v", conn.RemoteAddr(), p.isLoggedIn(), err)
 		p.disconnect()
 		return false
 	}
@@ -1367,7 +1399,7 @@ func (p *Player) sendPostLoginTail() {
 		p.sendPacket(append(other.otherPropsPacket(otherProps), '\n'))
 	}
 	p.server.playerMu.RUnlock()
-	if p.playerType&PLTYPE_ANYCLIENT != 0 && (p.versionId == 0 || p.versionId < 6015) {
+	if p.playerType&PLTYPE_ANYCLIENT != 0 && p.versionId > 0 && p.versionId < 300 {
 		p.sendPLO_LISTPROCESSES()
 	}
 }
@@ -1769,7 +1801,7 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.eloDeviation = 350.0
 	p.onlineTime = 0
 	p.rupees = 50
-	p.statusMsg = ""
+	p.statusMsg = 0
 	p.os = "wind"
 	p.envCodePage = 1252
 	for i := range p.gAttribs {
@@ -2077,7 +2109,17 @@ func (p *Player) writeEncodedPacket(packetName string, packetId byte, packet []b
 		data = packet
 	}
 	p.server.logger.Debug("sendPacket: Writing %d bytes: % X", len(data), data)
-	p.conn.Write(data)
+	p.mu.Lock()
+	conn := p.conn
+	disconnected := p.disconnected
+	p.mu.Unlock()
+	if disconnected || conn == nil {
+		return
+	}
+	if _, err := conn.Write(data); err != nil {
+		p.server.logger.Debug("sendPacket: write error to player %d (%s): %v", p.id, p.accountName, err)
+		go p.disconnect()
+	}
 }
 
 func encodeOutgoingPacket(packet []byte) []byte {
@@ -3044,7 +3086,7 @@ func (p *Player) getProp(propId int) []byte {
 		buf.WriteGChar(byte(len(p.language)))
 		buf.data = append(buf.data, p.language...)
 	case PLPROP_PSTATUSMSG:
-		buf.WriteGChar(0)
+		buf.WriteGChar(p.statusMsg)
 	case PLPROP_Z:
 		z := int(p.z) / 8
 		if z < -50 {
@@ -3250,7 +3292,7 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 		case PLPROP_PLANGUAGE:
 			p.language = buf.ReadGCharString()
 		case PLPROP_PSTATUSMSG:
-			p.statusMsg = fmt.Sprintf("%d", buf.ReadGChar())
+			p.statusMsg = buf.ReadGChar()
 		case PLPROP_GATTRIB1, PLPROP_GATTRIB2, PLPROP_GATTRIB3, PLPROP_GATTRIB4, PLPROP_GATTRIB5:
 			p.gAttribs[propId-PLPROP_GATTRIB1] = buf.ReadGCharString()
 		case PLPROP_GATTRIB6, PLPROP_GATTRIB7, PLPROP_GATTRIB8, PLPROP_GATTRIB9:
@@ -5753,14 +5795,14 @@ func (p *Player) msgPLI_REQUESTTEXT(packet []byte) bool {
 				"autobill=1\x01autobillmine=1\x01bundle=1\x01creationtime=1212768763\x01currenttime=1353248504\x01description=Gives\x01duration=2629800\x01flags=subscription\x01icon=graalicon_big.png\x01itemid=1\x01lifetime=1\x01owner=global\x01ownertype=server\x01price=100\x01quantity=988506\x01status=available\x01title=Gold\x01tradable=1\x01typeid=62\x01world=global")
 		} else if option == "serverinfo" {
 			if p.server.serverList != nil && p.server.serverList.connected {
-				p.server.serverList.SendPacket(append([]byte{SVO_REQUESTSVRINFO}, []byte(rawText)...))
+				p.server.serverList.SendTextPacket(SVO_REQUESTSVRINFO, rawText)
 			} else {
 				p.sendServerTextFields(weapon, type_, option, p.server.name)
 			}
 		}
 	} else if type_ == "pmservers" || type_ == "pmguilds" {
 		if p.server.serverList != nil && p.server.serverList.connected {
-			p.server.serverList.SendPacket(append([]byte{SVO_REQUESTLIST}, []byte(rawText)...))
+			p.server.serverList.SendTextPacket(SVO_REQUESTLIST, rawText)
 		} else {
 			p.sendServerTextFields(weapon, type_, option)
 		}
@@ -5802,7 +5844,7 @@ func (p *Player) msgPLI_SENDTEXT(packet []byte) bool {
 		option := parts[2]
 		if option == "verifybuddies" || option == "addbuddy" || option == "deletebuddy" {
 			if p.server.serverList != nil && p.server.serverList.connected {
-				p.server.serverList.SendPacket(append([]byte{SVO_SENDTEXT}, []byte(rawText)...))
+				p.server.serverList.SendTextPacket(SVO_SENDTEXT, rawText)
 			}
 		}
 	}
@@ -7435,6 +7477,9 @@ type ServerList struct {
 	nextConnectionAttempt time.Time
 	connectionAttempts    int
 	lastTimer             time.Time
+	lastReceive           time.Time
+	lastIdleLog           time.Time
+	lastKeepalive         time.Time
 	codec                 uint32
 	readBuffer            []byte
 }
@@ -7460,6 +7505,10 @@ func (sl *ServerList) doTimedEvents() {
 			sl.connectionAttempts = 0
 		}
 	}
+	if sl.connected && now.Sub(sl.lastKeepalive) >= time.Minute {
+		sl.lastKeepalive = now
+		sl.sendSetIPKeepalive()
+	}
 }
 
 func (sl *ServerList) connectServer() bool {
@@ -7480,7 +7529,10 @@ func (sl *ServerList) connectServer() bool {
 	}
 	sl.conn = conn
 	sl.connected = true
-	go sl.sendLoop()
+	sl.lastReceive = time.Now()
+	sl.lastIdleLog = time.Time{}
+	sl.lastKeepalive = time.Now()
+	go sl.sendLoop(conn)
 	go sl.receiveLoop()
 	sl.server.logger.Write(":: listserver - Connected.")
 	// Set GEN_1 for first packet
@@ -7557,12 +7609,28 @@ func (sl *ServerList) connectServer() bool {
 		buf.WriteGChar(SVO_SERVERHQLEVEL).WriteGChar(byte(hqLevel))
 	}
 	sl.sendPacket(buf.Bytes())
-	// Packet 5: SVO_SENDTEXT - send allowed versions config
-	buf = NewBuffer()
-	buf.WriteGChar(SVO_SENDTEXT).WriteString8("Listserver,settings,allowedversions,")
-	sl.sendPacket(buf.Bytes())
+	sl.sendVersionConfig()
 	sl.sendPlayers()
 	return true
+}
+
+func (sl *ServerList) sendSetIPKeepalive() {
+	ip := sl.server.settings.Get("serverip")
+	if ip == "" {
+		ip = "AUTO"
+	}
+	sl.server.logger.Debug("[LISTSERVER] Sending SVO_SETIP keepalive")
+	sl.SetIp(ip)
+}
+
+func (sl *ServerList) sendVersionConfig() {
+	if !sl.connected {
+		return
+	}
+	text := "Listserver,settings,allowedversions," + sl.server.allowedVersionsListserverText()
+	buf := NewBuffer()
+	buf.WriteGChar(SVO_SENDTEXT).Write([]byte(text))
+	sl.sendPacket(buf.Bytes())
 }
 
 func (sl *ServerList) Connect(address string) error {
@@ -7575,17 +7643,26 @@ func (sl *ServerList) Connect(address string) error {
 	}
 	sl.conn = conn
 	sl.connected = true
-	go sl.sendLoop()
+	sl.lastReceive = time.Now()
+	sl.lastIdleLog = time.Time{}
+	sl.lastKeepalive = time.Now()
+	go sl.sendLoop(conn)
 	go sl.receiveLoop()
 	return nil
 }
 
-func (sl *ServerList) sendLoop() {
+func (sl *ServerList) sendLoop(conn net.Conn) {
 	for packet := range sl.sendQueue {
-		if !sl.connected {
+		if !sl.connected || sl.conn != conn {
 			break
 		}
-		sl.conn.Write(packet)
+		if _, err := conn.Write(packet); err != nil {
+			sl.server.logger.Error("[LISTSERVER] Send error: %v", err)
+			if sl.conn == conn {
+				sl.Disconnect()
+			}
+			break
+		}
 	}
 }
 
@@ -7598,7 +7675,11 @@ func (sl *ServerList) receiveLoop() {
 			if err == io.EOF {
 				sl.server.logger.Debug("[LISTSERVER] Connection closed by listserver")
 			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				sl.server.logger.Debug("[LISTSERVER] Read timeout")
+				now := time.Now()
+				if now.Sub(sl.lastReceive) >= 30*time.Second && now.Sub(sl.lastIdleLog) >= 30*time.Second {
+					sl.server.logger.Debug("[LISTSERVER] Idle waiting for listserver data for %s", now.Sub(sl.lastReceive).Round(time.Second))
+					sl.lastIdleLog = now
+				}
 				continue
 			} else {
 				sl.server.logger.Error("[LISTSERVER] Receive error: %v", err)
@@ -7606,6 +7687,7 @@ func (sl *ServerList) receiveLoop() {
 			break
 		}
 		sl.server.logger.Debug("[LISTSERVER] Received %d raw bytes", n)
+		sl.lastReceive = time.Now()
 		sl.readBuffer = append(sl.readBuffer, buf[:n]...)
 		sl.processListData()
 	}
@@ -7707,11 +7789,17 @@ func (sl *ServerList) processPacket(data []byte) {
 }
 func (sl *ServerList) SendPacket(packet []byte) {
 	if sl.connected {
-		select {
-		case sl.sendQueue <- packet:
-		default:
-		}
+		sl.sendPacket(packet)
 	}
+}
+
+func (sl *ServerList) SendTextPacket(packetId byte, text string) {
+	if !sl.connected {
+		return
+	}
+	buf := NewBuffer()
+	buf.WriteGChar(packetId).Write([]byte(text))
+	sl.sendPacket(buf.Bytes())
 }
 
 func (sl *ServerList) sendPacket(packet []byte) {
