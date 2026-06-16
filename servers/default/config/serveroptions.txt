@@ -5,10 +5,12 @@
 #startx = 30
 #starty = 30.5
 
-# Enable verbose packet/logging debug output.
-# When true, logs all packet bytes, compression info, and protocol details.
-# When false (default), only shows normal info like logins, disconnects, errors.
+# Enable high-level debug output.
 debugmode = true
+
+# Enable extremely verbose packet byte/encryption/compression dumps.
+# This is useful while tracing protocol framing, but noisy during normal testing.
+packetdebugmode = false
 
 # Specifies where players go when they say "unstick me".
 unstickmelevel = onlinestartlocal.nw

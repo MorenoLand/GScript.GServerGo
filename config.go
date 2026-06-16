@@ -113,6 +113,10 @@ func (l *Logger) Debug(format string, args ...interface{}) {
 	if !DEBUG_MODE { return }
 	l.Write("[DEBUG] "+format, args...)
 }
+func (l *Logger) PacketDebug(format string, args ...interface{}) {
+	if !DEBUG_MODE || !PACKET_DEBUG_MODE { return }
+	l.Write("[DEBUG] "+format, args...)
+}
 
 // FileSystem handles file operations
 type FileSystem struct { basePath string; mu sync.RWMutex; cache map[string][]byte }

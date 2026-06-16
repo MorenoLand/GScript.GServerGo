@@ -5,9 +5,51 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestLoadSettingsControlsPacketDebugSeparately(t *testing.T) {
+	oldDebugMode := DEBUG_MODE
+	oldPacketDebugMode := PACKET_DEBUG_MODE
+	t.Cleanup(func() {
+		DEBUG_MODE = oldDebugMode
+		PACKET_DEBUG_MODE = oldPacketDebugMode
+	})
+
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+
+	writeOptions := func(contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(configDir, "serveroptions.txt"), []byte(contents), 0644); err != nil {
+			t.Fatalf("write serveroptions: %v", err)
+		}
+	}
+
+	server := &Server{logger: NewLogger("", false), config: NewFileSystem(dir), settings: NewSettings()}
+	writeOptions("debugmode = true\npacketdebugmode = false\n")
+	server.loadSettings()
+	if !DEBUG_MODE {
+		t.Fatalf("DEBUG_MODE = false, want true")
+	}
+	if PACKET_DEBUG_MODE {
+		t.Fatalf("PACKET_DEBUG_MODE = true, want false")
+	}
+
+	writeOptions("debugmode = false\npacketdebugmode = true\n")
+	server.loadSettings()
+	if DEBUG_MODE {
+		t.Fatalf("DEBUG_MODE = true, want false")
+	}
+	if !PACKET_DEBUG_MODE {
+		t.Fatalf("PACKET_DEBUG_MODE = false, want true")
+	}
+}
 
 func TestSendPacketGen5LengthExcludesLengthPrefix(t *testing.T) {
 	serverConn, clientConn := net.Pipe()

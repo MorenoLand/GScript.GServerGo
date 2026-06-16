@@ -18,6 +18,7 @@ import (
 )
 
 var DEBUG_MODE bool = false
+var PACKET_DEBUG_MODE bool = false
 
 const zlibFixScript = "//#CLIENTSIDE\xa7" +
 	"if(playerchats) {\xa7" +
@@ -284,6 +285,7 @@ func (s *Server) loadSettings() {
 		s.logger.Error("Could not open config/serveroptions.txt. Will use default config.")
 	}
 	DEBUG_MODE = s.settings.GetBool("debugmode", false)
+	PACKET_DEBUG_MODE = s.settings.GetBool("packetdebugmode", false)
 }
 func (s *Server) loadAdminSettings() {
 	if err := s.adminSettings.Load(s.config.ResolvePath("config/adminconfig.txt")); err != nil {
@@ -1333,11 +1335,11 @@ func (p *Player) OnRecv() bool {
 	}
 	if n > 0 {
 		p.lastData = time.Now()
-		p.server.logger.Debug("OnRecv: received %d bytes, buffer now %d bytes", n, len(p.recvBuffer)+n)
+		p.server.logger.PacketDebug("OnRecv: received %d bytes, buffer now %d bytes", n, len(p.recvBuffer)+n)
 	}
 	p.recvBuffer = append(p.recvBuffer, buf[:n]...)
 	if len(p.recvBuffer) > 0 {
-		p.server.logger.Debug("OnRecv: buffer[0]=%02X buffer[1]=%02X", p.recvBuffer[0], p.recvBuffer[1])
+		p.server.logger.PacketDebug("OnRecv: buffer[0]=%02X buffer[1]=%02X", p.recvBuffer[0], p.recvBuffer[1])
 	}
 	p.processPackets()
 	return true
@@ -1988,11 +1990,11 @@ func (p *Player) handleRawData(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	p.server.logger.Debug("handleRawData: RAW data: % X (gen=%d)", data, p.encryption.gen)
+	p.server.logger.PacketDebug("handleRawData: RAW data: % X (gen=%d)", data, p.encryption.gen)
 	var decompressed []byte
 	var err error
 	if p.encryption.gen == ENCRYPT_GEN_4 {
-		p.server.logger.Debug("handleRawData: GEN_4 - decrypting and decompressing with BZ2")
+		p.server.logger.PacketDebug("handleRawData: GEN_4 - decrypting and decompressing with BZ2")
 		p.encryption.limit = 4 // COMPRESS_BZ2 limit
 		p.encryption.Decrypt(data)
 		decompressed, err = Bz2Decompress(data)
@@ -2006,15 +2008,15 @@ func (p *Player) handleRawData(data []byte) {
 		}
 		compressType := data[0]
 		encryptedData := data[1:]
-		p.server.logger.Debug("handleRawData: GEN_5+ - compressType=%d, encrypted data: % X", compressType, encryptedData)
+		p.server.logger.PacketDebug("handleRawData: GEN_5+ - compressType=%d, encrypted data: % X", compressType, encryptedData)
 		// Set encryption limit based on compression type
 		limits := map[uint8]int32{COMPRESS_UNCOMPRESSED: 12, COMPRESS_ZLIB: 4, COMPRESS_BZ2: 4}
 		if limit, ok := limits[compressType]; ok {
 			p.encryption.limit = limit
 		}
-		p.server.logger.Debug("handleRawData: BEFORE decrypt - iterator=%08X limit=%d", p.encryption.iterator, p.encryption.limit)
+		p.server.logger.PacketDebug("handleRawData: BEFORE decrypt - iterator=%08X limit=%d", p.encryption.iterator, p.encryption.limit)
 		p.encryption.Decrypt(encryptedData)
-		p.server.logger.Debug("handleRawData: AFTER decrypt - iterator=%08X data: % X", p.encryption.iterator, encryptedData)
+		p.server.logger.PacketDebug("handleRawData: AFTER decrypt - iterator=%08X data: % X", p.encryption.iterator, encryptedData)
 		if compressType == COMPRESS_ZLIB {
 			decompressed, err = ZlibDecompress(encryptedData)
 			if err != nil {
@@ -2034,11 +2036,11 @@ func (p *Player) handleRawData(data []byte) {
 			return
 		}
 	} else {
-		p.server.logger.Debug("handleRawData: GEN_1-3 - using newline delimiter")
+		p.server.logger.PacketDebug("handleRawData: GEN_1-3 - using newline delimiter")
 		p.handleDecompressedPackets(data)
 		return
 	}
-	p.server.logger.Debug("handleRawData: DECOMPRESSED data: % X", decompressed)
+	p.server.logger.PacketDebug("handleRawData: DECOMPRESSED data: % X", decompressed)
 	p.handleDecompressedPackets(decompressed)
 }
 
@@ -2070,9 +2072,9 @@ func (p *Player) sendPacket(packet []byte) {
 	if packetName == "" {
 		packetName = "UNKNOWN"
 	}
-	p.server.logger.Debug("sendPacket: RAW %s (ID %d): % X", packetName, packetId, packet)
+	p.server.logger.PacketDebug("sendPacket: RAW %s (ID %d): % X", packetName, packetId, packet)
 	if p.queueOutgoing {
-		p.server.logger.Debug("sendPacket: queued %s (ID %d), %d bytes", packetName, packetId, len(packet))
+		p.server.logger.PacketDebug("sendPacket: queued %s (ID %d), %d bytes", packetName, packetId, len(packet))
 		p.outQueue = append(p.outQueue, packet...)
 		return
 	}
@@ -2083,7 +2085,7 @@ func (p *Player) writeEncodedPacket(packetName string, packetId byte, packet []b
 	var data []byte
 	switch p.encryption.gen {
 	case ENCRYPT_GEN_1:
-		p.server.logger.Debug("sendPacket: GEN_1, sending %s (ID %d), raw %d bytes", packetName, packetId, len(packet))
+		p.server.logger.PacketDebug("sendPacket: GEN_1, sending %s (ID %d), raw %d bytes", packetName, packetId, len(packet))
 		data = packet
 	case ENCRYPT_GEN_2, ENCRYPT_GEN_3:
 		compressed, err := ZlibCompress(packet)
@@ -2095,7 +2097,7 @@ func (p *Player) writeEncodedPacket(packetName string, packetId byte, packet []b
 			p.server.logger.Error("sendPacket: compressed packet too large (%d bytes)", len(compressed))
 			return
 		}
-		p.server.logger.Debug("sendPacket: GEN_%d, sending %s (ID %d), compressed %d -> %d bytes", p.encryption.gen, packetName, packetId, len(packet), len(compressed))
+		p.server.logger.PacketDebug("sendPacket: GEN_%d, sending %s (ID %d), compressed %d -> %d bytes", p.encryption.gen, packetName, packetId, len(packet), len(compressed))
 		data = make([]byte, 2+len(compressed))
 		data[0] = byte(len(compressed) >> 8)
 		data[1] = byte(len(compressed))
@@ -2128,9 +2130,9 @@ func (p *Player) writeEncodedPacket(packetName string, packetId byte, packet []b
 			p.outEncryption.limit = limit
 		}
 		// Encrypt the compressed data with OUTPUT codec
-		p.server.logger.Debug("sendPacket: BEFORE encrypt - outIterator=%08X limit=%d", p.outEncryption.iterator, p.outEncryption.limit)
+		p.server.logger.PacketDebug("sendPacket: BEFORE encrypt - outIterator=%08X limit=%d", p.outEncryption.iterator, p.outEncryption.limit)
 		encrypted := p.outEncryption.Encrypt(compressed)
-		p.server.logger.Debug("sendPacket: AFTER encrypt - outIterator=%08X", p.outEncryption.iterator)
+		p.server.logger.PacketDebug("sendPacket: AFTER encrypt - outIterator=%08X", p.outEncryption.iterator)
 		// Build packet: [length_hi][length_lo][compression_type][encrypted...]
 		frameLen := 1 + len(encrypted)
 		if frameLen > 0xFFFC {
@@ -2142,12 +2144,12 @@ func (p *Player) writeEncodedPacket(packetName string, packetId byte, packet []b
 		data[1] = byte(frameLen)
 		data[2] = compressionType
 		copy(data[3:], encrypted)
-		p.server.logger.Debug("sendPacket: GEN_5, sending %s (ID %d), original %d bytes, compressed %d bytes, compression_type=%d", packetName, packetId, len(packet), len(compressed), compressionType)
+		p.server.logger.PacketDebug("sendPacket: GEN_5, sending %s (ID %d), original %d bytes, compressed %d bytes, compression_type=%d", packetName, packetId, len(packet), len(compressed), compressionType)
 	default:
-		p.server.logger.Debug("sendPacket: Unknown GEN_%d, sending %s (ID %d), raw %d bytes", p.encryption.gen, packetName, packetId, len(packet))
+		p.server.logger.PacketDebug("sendPacket: Unknown GEN_%d, sending %s (ID %d), raw %d bytes", p.encryption.gen, packetName, packetId, len(packet))
 		data = packet
 	}
-	p.server.logger.Debug("sendPacket: Writing %d bytes: % X", len(data), data)
+	p.server.logger.PacketDebug("sendPacket: Writing %d bytes: % X", len(data), data)
 	p.mu.Lock()
 	conn := p.conn
 	disconnected := p.disconnected
@@ -2217,7 +2219,7 @@ func (p *Player) sendCompress(forceSend bool) {
 	}
 	queued := append([]byte(nil), p.outQueue...)
 	p.outQueue = p.outQueue[:0]
-	p.server.logger.Debug("sendCompress: flushing queued login stream, %d bytes", len(queued))
+	p.server.logger.PacketDebug("sendCompress: flushing queued login stream, %d bytes", len(queued))
 	p.writeEncodedPacket("QUEUED", 0, queued)
 }
 
