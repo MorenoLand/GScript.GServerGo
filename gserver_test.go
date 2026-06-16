@@ -112,7 +112,8 @@ func TestNPCServerLoadsPseudoPlayerAccount(t *testing.T) {
 		"X 30.00\n"+
 		"Y 30.50\n"+
 		"MAXHP 3\n"+
-		"HP 3\n")
+		"HP 3\n"+
+		"IP -2115681208\n")
 
 	server.loadSettings()
 
@@ -125,6 +126,13 @@ func TestNPCServerLoadsPseudoPlayerAccount(t *testing.T) {
 	}
 	if got, want := int(npc.y/8), 61; got != want {
 		t.Fatalf("NPC server list y = %d, want %d", got, want)
+	}
+	if npc.accountIp != 0 {
+		t.Fatalf("NPC server accountIp = %d, want 0", npc.accountIp)
+	}
+	wantIP := NewBuffer().WriteGInt5(0).Bytes()
+	if got := npc.getProp(PLPROP_IPADDR); !bytes.Equal(got, wantIP) {
+		t.Fatalf("NPC server IP prop = % X, want % X", got, wantIP)
 	}
 }
 

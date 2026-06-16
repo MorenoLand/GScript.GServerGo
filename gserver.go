@@ -134,6 +134,8 @@ func (s *Server) initNPCServer() {
 		p.id = 1
 		p.playerType = PLTYPE_NPCSERVER
 		p.loaded = true
+		p.accountIp = 0
+		p.accountIpStr = "0"
 	}
 	p.character.headImage = s.settings.Get("staffhead")
 	if p.character.headImage == "" {
