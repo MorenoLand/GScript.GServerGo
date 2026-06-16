@@ -129,23 +129,27 @@ func (s *Server) initNPCServer() {
 	p.setServer(s)
 	p.accountName = "(npcserver)"
 	p.id = 1
+	if p.LoadAccount("(npcserver)", false) {
+		p.accountName = "(npcserver)"
+		p.id = 1
+		p.playerType = PLTYPE_NPCSERVER
+		p.loaded = true
+	}
 	p.character.headImage = s.settings.Get("staffhead")
 	if p.character.headImage == "" {
 		p.character.headImage = "head25.png"
 	}
-	nickName := s.settings.Get("nickname")
-	if nickName == "" {
-		nickName = "NPC-Server"
+	if p.character.nickName == "" {
+		nickName := s.settings.Get("nickname")
+		if nickName == "" {
+			nickName = "NPC-Server"
+		}
+		p.character.nickName = nickName + " (Server)"
 	}
-	nickName += " (Server)"
-	p.character.nickName = nickName
-	p.levelName = ""
 	p.lastData = time.Now()
 	p.lastMovement = time.Now()
 	p.lastSave = time.Now()
 	p.last1m = time.Now()
-	p.x = 0
-	p.y = 0
 	p.alignment = 50
 	s.playerMu.Lock()
 	s.players[p.id] = p

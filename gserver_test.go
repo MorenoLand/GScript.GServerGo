@@ -101,6 +101,33 @@ func TestLoadSettingsSyncsNPCServerPlayer(t *testing.T) {
 	}
 }
 
+func TestNPCServerLoadsPseudoPlayerAccount(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "config/serveroptions.txt", "serverside = true\n")
+	writeTestFile(t, server.config.GetBasePath(), "accounts/(npcserver).txt", ""+
+		"GRACC001\n"+
+		"NICK NPC-Server (Server)\n"+
+		"COMMUNITYNAME (npcserver)\n"+
+		"LEVEL \n"+
+		"X 30.00\n"+
+		"Y 30.50\n"+
+		"MAXHP 3\n"+
+		"HP 3\n")
+
+	server.loadSettings()
+
+	npc := server.players[1]
+	if npc == nil {
+		t.Fatalf("NPC server pseudo-player was not created")
+	}
+	if got, want := int(npc.x/8), 60; got != want {
+		t.Fatalf("NPC server list x = %d, want %d", got, want)
+	}
+	if got, want := int(npc.y/8), 61; got != want {
+		t.Fatalf("NPC server list y = %d, want %d", got, want)
+	}
+}
+
 func TestLoadNpcsLoadsControlNPCWithSavedID(t *testing.T) {
 	server := newLoginTestServer(t)
 	writeTestFile(t, server.config.GetBasePath(), "npcs/npcControl-NPC.txt", ""+
@@ -574,8 +601,8 @@ func TestRCFileBrowserUsesFolderConfigFallbackAndRootWildcard(t *testing.T) {
 	writeTestFile(t, server.config.GetBasePath(), "config/foldersconfig.txt", ""+
 		"level *.nw\n"+
 		"level levels/*.graal\n")
-	writeTestFile(t, server.config.GetBasePath(), "start.nw", "level")
-	writeTestFile(t, server.config.GetBasePath(), "levels/test.graal", "level")
+	writeTestFile(t, server.config.GetBasePath(), "world/start.nw", "level")
+	writeTestFile(t, server.config.GetBasePath(), "world/levels/test.graal", "level")
 	rc := NewPlayer(nil, server)
 	rc.playerType = PLTYPE_RC2
 	rc.adminRights = allLocalRights()
@@ -589,6 +616,33 @@ func TestRCFileBrowserUsesFolderConfigFallbackAndRootWildcard(t *testing.T) {
 	}
 	if !bytes.Contains(rc.outQueue, []byte("rw *.nw")) {
 		t.Fatalf("file browser dirlist missing derived root folder right: % X", rc.outQueue)
+	}
+}
+
+func TestFileSystemReadMethodsFallBackToWorldFolder(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "world/levels/test.nw", "level")
+	fs := NewFileSystem(dir)
+
+	files, err := fs.ListFiles("levels/")
+	if err != nil {
+		t.Fatalf("ListFiles fallback failed: %v", err)
+	}
+	if len(files) != 1 || files[0] != "test.nw" {
+		t.Fatalf("ListFiles fallback = %v, want test.nw", files)
+	}
+	data, err := fs.LoadFile("levels/test.nw")
+	if err != nil {
+		t.Fatalf("LoadFile fallback failed: %v", err)
+	}
+	if string(data) != "level" {
+		t.Fatalf("LoadFile fallback = %q, want level", data)
+	}
+	if _, err := fs.FileInfo("levels/test.nw"); err != nil {
+		t.Fatalf("FileInfo fallback failed: %v", err)
+	}
+	if !fs.FileExists("levels/test.nw") {
+		t.Fatalf("FileExists fallback = false, want true")
 	}
 }
 
