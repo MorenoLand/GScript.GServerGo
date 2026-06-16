@@ -2625,6 +2625,77 @@ func TestSendWeaponUsesNpcWeaponPropertyStream(t *testing.T) {
 	}
 }
 
+func TestSendAccountWeaponUsesDefaultWeaponPacketForBombAndBow(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{
+		conn:       serverConn,
+		server:     &Server{logger: NewLogger("", false), weapons: make(map[string]*Weapon)},
+		encryption: *NewEncryption(),
+	}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendAccountWeapon("bomb")
+		p.sendAccountWeapon("bow")
+		done <- struct{}{}
+	}()
+
+	want := []byte{PLO_DEFAULTWEAPON + 32, byte(ItemBomb) + 32, '\n'}
+	want = append(want, PLO_DEFAULTWEAPON+32, byte(ItemBow)+32, '\n')
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read default weapon packets: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("default weapon packets = % X, want % X", got, want)
+	}
+}
+
+func TestSendAccountWeaponFallsBackToScriptWeapon(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	weapon := &Weapon{name: "custom", image: "custom.png"}
+	p := &Player{
+		conn:       serverConn,
+		server:     &Server{logger: NewLogger("", false), weapons: map[string]*Weapon{"custom": weapon}},
+		encryption: *NewEncryption(),
+	}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendAccountWeapon("custom")
+		done <- struct{}{}
+	}()
+
+	want := []byte{PLO_NPCWEAPONADD + 32, byte(len(weapon.name)) + 32}
+	want = append(want, []byte(weapon.name)...)
+	want = append(want, NPCPROP_IMAGE+32, byte(len(weapon.image))+32)
+	want = append(want, []byte(weapon.image)...)
+	want = append(want, '\n')
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read script weapon packet: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("script weapon packet = % X, want % X", got, want)
+	}
+}
+
 func TestLevelModTimeUsesGInt5WireFormat(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()

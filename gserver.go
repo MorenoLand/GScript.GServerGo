@@ -1959,12 +1959,7 @@ func (p *Player) handleLogin(packet []byte) bool {
 		if strings.HasPrefix(weaponName, "-") {
 			continue
 		}
-		weapon := p.server.weapons[weaponName]
-		if weapon == nil {
-			continue
-		}
-		p.server.logger.Debug("Sending weapon: %s", weaponName)
-		p.sendWeapon(weapon)
+		p.sendAccountWeapon(weaponName)
 	}
 	p.server.logger.Info("Sending PLO_BIGMAP...")
 	bigmap := p.server.settings.Get("bigmap")
@@ -2747,6 +2742,26 @@ func (p *Player) sendPLO_DEFAULTWEAPON(weaponId byte) bool {
 	p.send(buf)
 	return true
 }
+
+func (p *Player) sendAccountWeapon(weaponName string) bool {
+	if p == nil || p.server == nil || weaponName == "" {
+		return false
+	}
+	if itemType := getItemId(strings.ToLower(weaponName)); itemType != LevelItemType(-1) {
+		p.server.logger.Debug("Sending default weapon: %s", weaponName)
+		return p.sendPLO_DEFAULTWEAPON(byte(itemType))
+	}
+	weapon := p.server.weapons[weaponName]
+	if weapon == nil {
+		weapon = p.server.weapons[strings.ToLower(weaponName)]
+	}
+	if weapon == nil {
+		return false
+	}
+	p.server.logger.Debug("Sending weapon: %s", weaponName)
+	return p.sendWeapon(weapon)
+}
+
 func (p *Player) sendPLO_HASNPCSERVER() bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_HASNPCSERVER)
