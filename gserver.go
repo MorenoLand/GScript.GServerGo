@@ -63,6 +63,7 @@ type Server struct {
 	flags           map[string]string
 	flagMu          sync.RWMutex
 	serverList      *ServerList
+	serverLists     []*ServerList
 	npcServer       *NPCServer
 	triggerCommands map[string]func(*Player, []string) bool
 	serverMessage   string
@@ -87,6 +88,7 @@ func NewServer(name string) *Server {
 		shutdown: make(chan struct{}),
 	}
 	s.serverList = NewServerList(s)
+	s.serverLists = []*ServerList{s.serverList}
 	s.npcServer = NewNPCServer(s)
 	s.triggerCommands = make(map[string]func(*Player, []string) bool)
 	s.initTriggerCommands()
@@ -190,11 +192,17 @@ func (s *Server) doTimedEvents() bool {
 	return true
 }
 
+func (s *Server) shouldUseLoginServerMode() bool {
+	return s != nil && s.settings != nil && s.settings.GetBool("loginserver", false)
+}
+
 func (s *Server) updateServerTime() { s.serverTime++ }
 
 func (s *Server) oneSecondEvents() {
-	if s.serverList != nil {
-		s.serverList.doTimedEvents()
+	for _, serverList := range s.serverLists {
+		if serverList != nil {
+			serverList.doTimedEvents()
+		}
 	}
 	s.processLevelBoardRespawns()
 	s.npcMu.Lock()
@@ -587,7 +595,7 @@ func (s *Server) loadConfigFiles() error {
 	if name := s.settings.Get("name"); name != "" {
 		s.name = name
 	}
-	s.serverList.enabled = true
+	s.configureServerLists()
 	return nil
 }
 
@@ -685,8 +693,12 @@ func (s *Server) AddPlayer(player *Player, id uint16) bool {
 	player.setId(id)
 	s.players[id] = player
 	s.logger.Info("Player %d added (account: %s)", id, player.getAccountName())
-	if s.serverList != nil && isListserverPlayer(player) {
-		s.serverList.AddPlayer(player)
+	if isListserverPlayer(player) {
+		for _, serverList := range s.serverLists {
+			if serverList != nil {
+				serverList.AddPlayer(player)
+			}
+		}
 	}
 	return true
 }
@@ -707,8 +719,10 @@ func (s *Server) DeletePlayer(player *Player) {
 	if !existed {
 		return
 	}
-	if s.serverList != nil {
-		s.serverList.DeletePlayer(player)
+	for _, serverList := range s.serverLists {
+		if serverList != nil {
+			serverList.DeletePlayer(player)
+		}
 	}
 	for _, other := range remaining {
 		if other == nil || other.conn == nil || !other.isLoggedIn() {
@@ -930,6 +944,16 @@ func (s *Server) sendPacketToType(playerType int, data []byte) {
 	defer s.playerMu.RUnlock()
 	for _, p := range s.players {
 		if p != nil && p.playerType&playerType != 0 {
+			p.sendPacket(data)
+		}
+	}
+}
+
+func (s *Server) sendPacketToTypeExcept(playerType int, data []byte, excludeId uint16) {
+	s.playerMu.RLock()
+	defer s.playerMu.RUnlock()
+	for _, p := range s.players {
+		if p != nil && p.id != excludeId && p.playerType&playerType != 0 {
 			p.sendPacket(data)
 		}
 	}
@@ -1612,12 +1636,6 @@ func (p *Player) sendPLO_RC_CHAT(message string) bool {
 	return true
 }
 
-func rcChatPacket(message string) []byte {
-	buf := NewBuffer()
-	buf.WriteByte(PLO_RC_CHAT).Write([]byte(message))
-	return buf.Bytes()
-}
-
 func gtokenizeText(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -1698,7 +1716,6 @@ func guntokenizeText(text string) string {
 func (p *Player) sendRCPostLoginTail() {
 	p.server.broadcastPlayerListEntryToClients(p)
 	p.server.playerMu.RLock()
-	defer p.server.playerMu.RUnlock()
 	for _, other := range p.server.players {
 		if other == nil || other.id == p.id || !other.isLoggedIn() {
 			continue
@@ -1708,6 +1725,8 @@ func (p *Player) sendRCPostLoginTail() {
 		}
 		p.sendPLO_ADDPLAYER(other)
 	}
+	p.server.playerMu.RUnlock()
+	p.server.sendPacketToTypeExcept(PLTYPE_ANYRC, rcChatPacket("New RC: "+p.accountName), p.id)
 }
 
 func (p *Player) sendNCPostLoginTail() {
@@ -1721,7 +1740,7 @@ func (p *Player) sendNCPostLoginTail() {
 		}
 	}
 	p.server.playerMu.RUnlock()
-	p.server.sendPacketToType(PLTYPE_ANYNC, rcChatPacket("New NC: "+p.accountName))
+	p.server.sendPacketToTypeExcept(PLTYPE_ANYNC, rcChatPacket("New NC: "+p.accountName), p.id)
 }
 
 func (p *Player) sendNCNPCList() {
@@ -1873,6 +1892,14 @@ func (p *Player) handlePacket(packet []byte) bool {
 	packetName := pliNames[byte(packetId)]
 	if packetName == "" {
 		packetName = fmt.Sprintf("UNKNOWN_%d", packetId)
+	}
+	if isRCOnlyPacket(packetId) && p.playerType&PLTYPE_ANYRC == 0 {
+		p.server.logger.PacketDebug("[PACKET] Ignoring RC-only %s (ID %d, %d bytes) from %s", packetName, packetId, len(packet), p.accountName)
+		return true
+	}
+	if isNCOnlyPacket(packetId) && p.playerType&PLTYPE_ANYNC == 0 {
+		p.server.logger.PacketDebug("[PACKET] Ignoring NC-only %s (ID %d, %d bytes) from %s", packetName, packetId, len(packet), p.accountName)
+		return true
 	}
 	p.server.logger.Debug("[PACKET] Received %s (ID %d, %d bytes) from %s", packetName, packetId, len(packet), p.accountName)
 	switch packetId {
@@ -2277,7 +2304,7 @@ func (p *Player) handleLogin(packet []byte) bool {
 	sigBuf := NewBuffer()
 	sigBuf.WriteByte(PLO_SIGNATURE).WriteByte(73)
 	p.send(sigBuf)
-	if strings.Contains(strings.ToLower(p.server.name), "login") {
+	if p.server.shouldUseLoginServerMode() {
 		p.sendPLO_FULLSTOP()
 		ghostBuf := NewBuffer()
 		ghostBuf.WriteByte(PLO_GHOSTICON).WriteByte(1)
@@ -4731,7 +4758,7 @@ func (p *Player) msgPLI_RC_SERVEROPTIONSSET(packet []byte) bool {
 	if len(packet) > 1 {
 		options = guntokenizeText(string(packet[1:]))
 	}
-	adminOptions := []string{"name", "description", "url", "serverip", "serverport", "localip", "listip", "listport", "maxplayers", "onlystaff", "nofoldersconfig", "oldcreated", "serverside", "triggerhack_weapons", "triggerhack_guilds", "triggerhack_groups", "triggerhack_files", "triggerhack_rc", "flaghack_movement", "flaghack_ip", "sharefolder", "language"}
+	adminOptions := []string{"name", "description", "url", "serverip", "serverport", "localip", "listip", "listport", "listserver", "loginserver", "maxplayers", "onlystaff", "nofoldersconfig", "oldcreated", "serverside", "triggerhack_weapons", "triggerhack_guilds", "triggerhack_groups", "triggerhack_files", "triggerhack_rc", "flaghack_movement", "flaghack_ip", "sharefolder", "language"}
 	if !p.hasRight(PLPERM_MODIFYSTAFFACCOUNT) {
 		var filteredOptions []string
 		for _, line := range strings.Split(options, "\n") {
@@ -5419,9 +5446,6 @@ func (p *Player) sendRCHelp() {
 	}
 }
 
-func rcCommandAccountPacket(account string) []byte {
-	return NewBuffer().WriteGString(strings.TrimSpace(account)).Bytes()
-}
 func (p *Player) msgPLI_PROFILEGET(packet []byte) bool {
 	p.server.logger.Debug("PROFILEGET")
 	return true
@@ -8338,6 +8362,8 @@ func splitInput(input string, delimiter byte) []string {
 // ============ SERVER LIST ============
 type ServerList struct {
 	server                *Server
+	host                  string
+	port                  string
 	conn                  net.Conn
 	connected             bool
 	sendQueue             chan []byte
@@ -8354,10 +8380,17 @@ type ServerList struct {
 }
 
 func NewServerList(s *Server) *ServerList {
-	return &ServerList{server: s, sendQueue: make(chan []byte, 100)}
+	return NewServerListEndpoint(s, "", "")
+}
+
+func NewServerListEndpoint(s *Server, host, port string) *ServerList {
+	return &ServerList{server: s, host: host, port: port, sendQueue: make(chan []byte, 100)}
 }
 
 func (sl *ServerList) doTimedEvents() {
+	if !sl.enabled {
+		return
+	}
 	now := time.Now()
 	sl.lastTimer = now
 	if !sl.connected && now.After(sl.nextConnectionAttempt) {
@@ -8381,15 +8414,24 @@ func (sl *ServerList) doTimedEvents() {
 }
 
 func (sl *ServerList) connectServer() bool {
+	if !sl.enabled {
+		return false
+	}
 	if sl.connected {
 		return true
 	}
-	listip := sl.server.settings.Get("listip")
-	listport := sl.server.settings.Get("listport")
+	listip := sl.host
+	if listip == "" {
+		listip = sl.server.settings.Get("listip")
+	}
+	listport := sl.port
+	if listport == "" {
+		listport = sl.server.settings.Get("listport")
+	}
 	if listip == "" || listport == "" {
 		return false
 	}
-	sl.server.logger.Write(":: Initializing listserver socket.")
+	sl.server.logger.Write(":: Initializing listserver socket (%s:%s).", listip, listport)
 	address := net.JoinHostPort(listip, listport)
 	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
 	if err != nil {
@@ -8403,7 +8445,7 @@ func (sl *ServerList) connectServer() bool {
 	sl.lastKeepalive = time.Now()
 	go sl.sendLoop(conn)
 	go sl.receiveLoop()
-	sl.server.logger.Write(":: listserver - Connected.")
+	sl.server.logger.Write(":: listserver - Connected (%s:%s).", listip, listport)
 	// Set GEN_1 for first packet
 	sl.codec = ENCRYPT_GEN_1
 	// Packet 1: SVO_REGISTERV3 with writeGChar encoding
@@ -8982,7 +9024,7 @@ func calculateCrc32Checksum(data []byte) uint32 {
 }
 
 func (p *Player) sendFile(fileName string) {
-	data, err := p.server.config.LoadFile(fileName)
+	resolvedName, data, err := p.server.resolveRequestedFile(fileName)
 	if err != nil {
 		p.server.logger.Warning("sendFile: Failed to load %s: %v", fileName, err)
 		p.sendPLO_FILESENDFAILED(fileName)
@@ -8990,7 +9032,7 @@ func (p *Player) sendFile(fileName string) {
 	}
 	modTime := time.Time{}
 	if p.server != nil && p.server.config != nil {
-		modTime, _ = p.server.config.FileModTime(fileName)
+		modTime, _ = p.server.config.FileModTime(resolvedName)
 	}
 	filePacket := NewBuffer()
 	filePacket.WriteGChar(PLO_FILE)
@@ -9007,6 +9049,38 @@ func (p *Player) sendFile(fileName string) {
 	buf.Write(filePacket.Bytes())
 	p.sendPacket(buf.Bytes())
 	p.server.logger.Debug("sendFile: Sent %s (%d bytes)", fileName, len(data))
+}
+
+func (s *Server) resolveRequestedFile(fileName string) (string, []byte, error) {
+	if data, err := s.config.LoadFile(fileName); err == nil {
+		return fileName, data, nil
+	}
+	if strings.ContainsAny(fileName, `/\`) {
+		data, err := s.config.LoadFile(fileName)
+		return fileName, data, err
+	}
+	lines, err := s.config.LoadFileAsLines("config/foldersconfig.txt")
+	if err == nil {
+		for _, line := range lines {
+			fields := strings.Fields(strings.TrimSpace(line))
+			if len(fields) < 2 {
+				continue
+			}
+			pattern := filepath.ToSlash(fields[1])
+			basePattern := filepath.Base(pattern)
+			matched, err := filepath.Match(basePattern, fileName)
+			if err != nil || !matched {
+				continue
+			}
+			prefix := strings.TrimSuffix(pattern, basePattern)
+			candidate := filepath.ToSlash(filepath.Join(prefix, fileName))
+			if data, err := s.config.LoadFile(candidate); err == nil {
+				return candidate, data, nil
+			}
+		}
+	}
+	data, err := s.config.LoadFile(fileName)
+	return fileName, data, err
 }
 
 func (p *Player) getPMServerList() []string {

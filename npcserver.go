@@ -83,8 +83,10 @@ func (n *NPCServer) Start() *Player {
 	n.host.playerMu.Lock()
 	n.host.players[p.id] = p
 	n.host.playerMu.Unlock()
-	if n.host.serverList != nil {
-		n.host.serverList.AddPlayer(p)
+	for _, serverList := range n.host.serverLists {
+		if serverList != nil {
+			serverList.AddPlayer(p)
+		}
 	}
 	n.host.broadcastPlayerListEntryToClients(p)
 	n.host.logger.Info("NPC-Server initialized (id=%d account=%s nickname=%s type=%d x=%d y=%d)", p.id, p.accountName, p.character.nickName, p.playerType, int(p.x), int(p.y))

@@ -111,6 +111,100 @@ func TestLoadSettingsSyncsNPCServerPlayer(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFilesHonorsListserverFalse(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "serveroptions.txt"), []byte("name = LAN Test\nlistserver = false\n"), 0644); err != nil {
+		t.Fatalf("write serveroptions: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "adminconfig.txt"), []byte(""), 0644); err != nil {
+		t.Fatalf("write adminconfig: %v", err)
+	}
+
+	server := NewServer("Test")
+	server.config = NewFileSystem(dir)
+	server.logger = NewLogger("", false)
+
+	if err := server.loadConfigFiles(); err != nil {
+		t.Fatalf("loadConfigFiles: %v", err)
+	}
+	if server.name != "LAN Test" {
+		t.Fatalf("server name = %q, want LAN Test", server.name)
+	}
+	if server.serverList == nil {
+		t.Fatal("serverList was nil")
+	}
+	if server.serverList.enabled {
+		t.Fatal("serverList.enabled = true, want false when listserver=false")
+	}
+}
+
+func TestLoadConfigFilesBuildsMultipleListservers(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	options := "listserver = true\nlistip = listserver.graal.in, listserver.moreno.land\nlistport = 14900, 14901\n"
+	if err := os.WriteFile(filepath.Join(configDir, "serveroptions.txt"), []byte(options), 0644); err != nil {
+		t.Fatalf("write serveroptions: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "adminconfig.txt"), []byte(""), 0644); err != nil {
+		t.Fatalf("write adminconfig: %v", err)
+	}
+
+	server := NewServer("Test")
+	server.config = NewFileSystem(dir)
+	server.logger = NewLogger("", false)
+
+	if err := server.loadConfigFiles(); err != nil {
+		t.Fatalf("loadConfigFiles: %v", err)
+	}
+	if len(server.serverLists) != 2 {
+		t.Fatalf("serverLists len = %d, want 2", len(server.serverLists))
+	}
+	if server.serverLists[0].host != "listserver.graal.in" || server.serverLists[0].port != "14900" {
+		t.Fatalf("first endpoint = %s:%s", server.serverLists[0].host, server.serverLists[0].port)
+	}
+	if server.serverLists[1].host != "listserver.moreno.land" || server.serverLists[1].port != "14901" {
+		t.Fatalf("second endpoint = %s:%s", server.serverLists[1].host, server.serverLists[1].port)
+	}
+	if server.serverList != server.serverLists[0] {
+		t.Fatal("primary serverList is not first configured endpoint")
+	}
+}
+
+func TestServerListTimedEventsSkipsWhenDisabled(t *testing.T) {
+	server := NewServer("Test")
+	server.logger = NewLogger("", false)
+	sl := server.serverList
+	sl.enabled = false
+	sl.connected = false
+	sl.nextConnectionAttempt = time.Time{}
+
+	sl.doTimedEvents()
+
+	if !sl.lastTimer.IsZero() {
+		t.Fatalf("lastTimer = %v, want zero when disabled", sl.lastTimer)
+	}
+}
+
+func TestLoginServerModeRequiresExplicitOption(t *testing.T) {
+	server := NewServer("Login")
+	server.settings = NewSettings()
+	if server.shouldUseLoginServerMode() {
+		t.Fatal("login server mode enabled without loginserver option")
+	}
+
+	server.settings.Set("loginserver", "true")
+	if !server.shouldUseLoginServerMode() {
+		t.Fatal("login server mode disabled with loginserver=true")
+	}
+}
+
 func TestNPCServerLoadsPseudoPlayerAccount(t *testing.T) {
 	server := newLoginTestServer(t)
 	writeTestFile(t, server.config.GetBasePath(), "config/serveroptions.txt", "serverside = true\n")
@@ -337,6 +431,68 @@ func TestRCPostLoginTailIncludesNPCServerWithoutSocket(t *testing.T) {
 	want := append([]byte{PLO_ADDPLAYER + 32}, NewBuffer().WriteGShort(npc.id).Bytes()...)
 	if !bytes.Contains(rc.outQueue, want) {
 		t.Fatalf("rc did not receive npc-server addplayer entry: % X", rc.outQueue)
+	}
+}
+
+func TestRCPostLoginTailAnnouncesNewRCToOtherRCs(t *testing.T) {
+	server := newLoginTestServer(t)
+	existing := NewPlayer(nil, server)
+	existing.id = 2
+	existing.playerType = PLTYPE_RC2
+	existing.accountName = "Owner"
+	existing.loaded = true
+	existing.queueOutgoing = true
+	existing.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[existing.id] = existing
+
+	rc := NewPlayer(nil, server)
+	rc.id = 3
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "moondeath"
+	rc.loaded = true
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
+
+	rc.sendRCPostLoginTail()
+
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("New RC: moondeath")...)
+	if !bytes.Contains(existing.outQueue, want) {
+		t.Fatalf("existing RC did not receive new RC message: % X", existing.outQueue)
+	}
+	if bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("new RC should not receive its own new RC message: % X", rc.outQueue)
+	}
+}
+
+func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
+	server := newLoginTestServer(t)
+	existing := NewPlayer(nil, server)
+	existing.id = 2
+	existing.playerType = PLTYPE_NC
+	existing.accountName = "Owner"
+	existing.loaded = true
+	existing.queueOutgoing = true
+	existing.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[existing.id] = existing
+
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.loaded = true
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	nc.sendNCPostLoginTail()
+
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("New NC: moondeath")...)
+	if !bytes.Contains(existing.outQueue, want) {
+		t.Fatalf("existing NC did not receive new NC message: % X", existing.outQueue)
+	}
+	if bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("new NC should not receive its own new NC message: % X", nc.outQueue)
 	}
 }
 
@@ -832,6 +988,34 @@ func TestFileSystemReadMethodsFallBackToWorldFolder(t *testing.T) {
 	}
 	if !fs.FileExists("levels/test.nw") {
 		t.Fatalf("FileExists fallback = false, want true")
+	}
+}
+
+func TestResolveRequestedFileUsesFolderConfigPatterns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "config"), 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ganis"), 0755); err != nil {
+		t.Fatalf("create ganis dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config", "foldersconfig.txt"), []byte("file    ganis/*.gani\nfile    *.gani\n"), 0644); err != nil {
+		t.Fatalf("write foldersconfig: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ganis", "emoticon.gani"), []byte("gani data"), 0644); err != nil {
+		t.Fatalf("write gani: %v", err)
+	}
+
+	server := &Server{config: NewFileSystem(dir)}
+	resolved, data, err := server.resolveRequestedFile("emoticon.gani")
+	if err != nil {
+		t.Fatalf("resolveRequestedFile: %v", err)
+	}
+	if resolved != "ganis/emoticon.gani" {
+		t.Fatalf("resolved = %q, want ganis/emoticon.gani", resolved)
+	}
+	if string(data) != "gani data" {
+		t.Fatalf("data = %q, want gani data", string(data))
 	}
 }
 
@@ -1747,6 +1931,7 @@ func TestServerListTimedEventsSendsSetIPKeepalive(t *testing.T) {
 	server := &Server{logger: NewLogger("", false), settings: settings}
 	sl := &ServerList{
 		server:        server,
+		enabled:       true,
 		connected:     true,
 		sendQueue:     make(chan []byte, 1),
 		codec:         ENCRYPT_GEN_1,
@@ -1918,6 +2103,66 @@ func TestHandlePacketDecodesGraalEncodedPacketID(t *testing.T) {
 	}
 	if p.language != "English" {
 		t.Fatalf("language = %q, want English", p.language)
+	}
+}
+
+func TestControlOnlyPacketClassification(t *testing.T) {
+	rcOnly := []int{
+		PLI_RC_SERVEROPTIONSGET,
+		PLI_RC_PLAYERBANSET,
+		PLI_RC_FILEBROWSER_START,
+		PLI_NPCSERVERQUERY,
+		PLI_RC_FOLDERDELETE,
+		PLI_RC_UNKNOWN162,
+	}
+	for _, packetId := range rcOnly {
+		if !isRCOnlyPacket(packetId) {
+			t.Fatalf("packet %d should be RC-only", packetId)
+		}
+	}
+
+	ncOnly := []int{
+		PLI_NC_LISTNPCS,
+		PLI_NC_NPCGET,
+		PLI_NC_CLASSDELETE,
+		PLI_NC_LEVELLISTGET,
+		PLI_NC_LEVELLISTSET,
+	}
+	for _, packetId := range ncOnly {
+		if !isNCOnlyPacket(packetId) {
+			t.Fatalf("packet %d should be NC-only", packetId)
+		}
+	}
+
+	sharedOrClient := []int{
+		PLI_PROFILEGET,
+		PLI_PROFILESET,
+		PLI_UPDATECLASS,
+		PLI_REQUESTUPDATEBOARD,
+		PLI_LANGUAGE,
+	}
+	for _, packetId := range sharedOrClient {
+		if isRCOnlyPacket(packetId) || isNCOnlyPacket(packetId) {
+			t.Fatalf("packet %d should not be control-only", packetId)
+		}
+	}
+}
+
+func TestHandlePacketIgnoresControlPacketsFromGameClients(t *testing.T) {
+	p := &Player{
+		server:     &Server{logger: NewLogger("", false)},
+		playerType: PLTYPE_CLIENT3,
+	}
+	p.accountName = "moondeath"
+
+	if !p.handlePacket([]byte{byte(PLI_RC_PLAYERBANSET + 32), 0x01, 0x02}) {
+		t.Fatal("handlePacket returned false for RC-only packet")
+	}
+	if p.invalidPackets != 0 {
+		t.Fatalf("invalidPackets = %d, want 0", p.invalidPackets)
+	}
+	if p.packetCount != 1 {
+		t.Fatalf("packetCount = %d, want 1", p.packetCount)
 	}
 }
 

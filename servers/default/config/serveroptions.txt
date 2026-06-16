@@ -6,7 +6,7 @@
 #starty = 30.5
 
 # Enable high-level debug output.
-debugmode = true
+debugmode = false
 
 # Enable extremely verbose packet byte/encryption/compression dumps.
 # This is useful while tracing protocol framing, but noisy during normal testing.
@@ -15,7 +15,7 @@ packetdebugmode = false
 # Specifies where players go when they say "unstick me".
 unstickmelevel = onlinestartlocal.nw
 unstickmex = 30
-unstickmey = 30.5
+unstickmey = 31
 unstickmetime = 30
 
 # Players in these levels can''t warp out nor can they PM other players.
@@ -165,10 +165,20 @@ serverinterface = AUTO
 # If you have a Linux server, you will want to change this, though.
 localip = AUTO
 
-# Specifies the location of the list server.
+# Specifies the location of the list server(s).
+# Multiple listservers can be comma-separated. listport matches listip by index;
+# if only one port is supplied, it is used for every host.
 # DON'T CHANGE IF YOU DON'T KNOW WHAT YOU ARE DOING.
-listip = listserver.graal.in
-listport = 14900
+listip = listserver.graal.in,listserver.moreno.land
+listport = 14900,14900
+
+# Set to true to register with the configured listserver(s).
+# Set to false for LAN/direct-connect setups where clients connect straight to the gserver.
+listserver = true
+
+# Set to true only if this server should behave like a login server and send
+# the login-server specific FULLSTOP/GHOSTICON packets during connect.
+loginserver = false
 
 # Maximum number of players allowed on the server.
 maxplayers = 128
@@ -188,18 +198,18 @@ oldcreated = true
 serverside = true
 
 # Enables triggeraction hacks.
-triggerhack_weapons = false	# gr.addweapon, gr.deleteweapon
-triggerhack_guilds = false	# gr.addguildmember, gr.removeguildmember, gr.removeguild, gr.setguild
-triggerhack_groups = true	# gr.setgroup, gr.setlevelgroup
-triggerhack_files = false	# gr.appendfile, gr.writefile
-triggerhack_rc = false		# gr.rcchat
-triggerhack_execscript = false	# gr.es_clear, gr.es_set, gr.es_append, gr.es
-triggerhack_props = false	# gr.attr1-gr.attr30
-triggerhack_levels = false	# gr.updatelevel
+triggerhack_weapons = false# gr.addweapon, gr.deleteweapon
+triggerhack_guilds = false# gr.addguildmember, gr.removeguildmember, gr.removeguild, gr.setguild
+triggerhack_groups = true# gr.setgroup, gr.setlevelgroup
+triggerhack_files = false# gr.appendfile, gr.writefile
+triggerhack_rc = false# gr.rcchat
+triggerhack_execscript = false# gr.es_clear, gr.es_set, gr.es_append, gr.es
+triggerhack_props = false# gr.attr1-gr.attr30
+triggerhack_levels = false# gr.updatelevel
 
 # Enables flag hacks.
-flaghack_movement = true	# -gr_movement weapon.
-flaghack_ip = false		# gr.ip
+flaghack_movement = true# -gr_movement weapon.
+flaghack_ip = false# gr.ip
 
 # If folders config is disabled, put additional search directories besides "world" here.
 # Comma delimited array.

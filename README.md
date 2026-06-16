@@ -42,6 +42,8 @@ How-to setup a server:
 6) Run `go run .` -- enjoy.
 7) Report any bugs on the Graal forums or GitHub issues.
 
+For LAN or direct-connect testing, set `listserver = false` in `config/serveroptions.txt`. That disables the listserver connection so clients can connect straight to the gserver without depending on the public hub. Multiple listservers can be configured with comma-separated `listip` and `listport` values.
+
 ## Implementation Status
 
 **Progress: 70% (31/44 files convertible without V8)**
@@ -106,6 +108,7 @@ Tested with the legacy 2.22 client:
 
 - Login reaches the game world after the GEN_5 outbound frame fix.
 - Listserver registration shows NPCServer and connected clients.
+- `listserver=false` disables listserver registration for LAN/direct-connect setups.
 - Multiple local clients can see each other join/leave.
 - Movement, chat, player prop changes, and dropped rupees replicate to the other client.
 - Death/respawn level reload now routes through `warp()` so the client receives the full level data stream.
