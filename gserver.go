@@ -441,10 +441,174 @@ func parseWeapon(data string) *Weapon {
 	}
 	return weapon
 }
+
+func parseDatabaseNPC(data string) *NPC {
+	lines := strings.Split(strings.ReplaceAll(data, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "GRNPC001" {
+		return nil
+	}
+	npc := NewNPC(DBNPC)
+	inScript := false
+	var scriptLines []string
+	for i := 1; i < len(lines); i++ {
+		line := strings.TrimRight(lines[i], "\r")
+		trimmed := strings.TrimSpace(line)
+		if inScript {
+			if trimmed == "NPCSCRIPTEND" {
+				inScript = false
+				npc.script = strings.Join(scriptLines, "\n")
+				scriptLines = nil
+			} else {
+				scriptLines = append(scriptLines, line)
+			}
+			continue
+		}
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "NPCSCRIPT" {
+			inScript = true
+			continue
+		}
+		parts := strings.SplitN(trimmed, " ", 2)
+		key := strings.ToUpper(parts[0])
+		value := ""
+		if len(parts) == 2 {
+			value = strings.TrimSpace(parts[1])
+		}
+		switch key {
+		case "NAME":
+			npc.npcName = value
+		case "ID":
+			if id, err := strconv.ParseUint(value, 10, 32); err == nil {
+				npc.id = uint32(id)
+			}
+		case "TYPE":
+			npc.scriptType = value
+		case "SCRIPTER":
+			npc.scripter = value
+		case "IMAGE":
+			npc.image = value
+		case "STARTLEVEL":
+			if value != "" {
+				npc.level = &Level{levelName: value}
+			}
+		case "STARTX":
+			if x, err := strconv.ParseFloat(value, 32); err == nil {
+				npc.x = int16(x * 16)
+			}
+		case "STARTY":
+			if y, err := strconv.ParseFloat(value, 32); err == nil {
+				npc.y = int16(y * 16)
+			}
+		case "NICK":
+			npc.character.nickName = value
+		case "ANI":
+			npc.character.gani = value
+		case "HP":
+			if hp, err := strconv.Atoi(value); err == nil {
+				npc.character.hitpoints = hp
+			}
+		case "GRALATS":
+			if gralats, err := strconv.Atoi(value); err == nil {
+				npc.character.gralats = gralats
+			}
+		case "ARROWS":
+			if arrows, err := strconv.Atoi(value); err == nil {
+				npc.character.arrows = arrows
+			}
+		case "BOMBS":
+			if bombs, err := strconv.Atoi(value); err == nil {
+				npc.character.bombs = bombs
+			}
+		case "GLOVEP":
+			if glove, err := strconv.Atoi(value); err == nil {
+				npc.character.glovePower = glove
+			}
+		case "SWORDP":
+			if sword, err := strconv.Atoi(value); err == nil {
+				npc.character.swordPower = sword
+			}
+		case "SHIELDP":
+			if shield, err := strconv.Atoi(value); err == nil {
+				npc.character.shieldPower = shield
+			}
+		case "HEAD":
+			npc.character.headImage = value
+		case "BODY":
+			npc.character.bodyImage = value
+		case "SWORD":
+			npc.character.swordImage = value
+		case "SHIELD":
+			npc.character.shieldImage = value
+		case "HORSE":
+			npc.character.horseImage = value
+		case "COLORS":
+			colorParts := strings.Split(value, ",")
+			for i := 0; i < len(colorParts) && i < len(npc.character.colors); i++ {
+				if color, err := strconv.Atoi(strings.TrimSpace(colorParts[i])); err == nil {
+					npc.character.colors[i] = byte(color)
+				}
+			}
+		case "SPRITE":
+			if sprite, err := strconv.Atoi(value); err == nil {
+				npc.character.sprite = byte(sprite)
+			}
+		case "AP":
+			if ap, err := strconv.Atoi(value); err == nil {
+				npc.character.ap = ap
+			}
+		case "TIMEOUT":
+			if timeout, err := strconv.Atoi(value); err == nil {
+				npc.timeout = timeout
+			}
+		case "SAVEARR":
+			saveParts := strings.Split(value, ",")
+			for i := 0; i < len(saveParts) && i < len(npc.saves); i++ {
+				if save, err := strconv.Atoi(strings.TrimSpace(saveParts[i])); err == nil {
+					npc.saves[i] = byte(save)
+				}
+			}
+		}
+	}
+	if inScript && len(scriptLines) > 0 {
+		npc.script = strings.Join(scriptLines, "\n")
+	}
+	if npc.npcName == "" || npc.id == 0 {
+		return nil
+	}
+	return npc
+}
+
 func (s *Server) loadClasses(print bool) {}
 func (s *Server) loadMaps(print bool)    {}
-func (s *Server) loadNpcs(print bool)    {}
-func (s *Server) loadTranslations()      {}
+func (s *Server) loadNpcs(print bool) {
+	files, err := s.config.ListFiles("npcs/")
+	if err != nil {
+		return
+	}
+	for _, file := range files {
+		if !strings.HasPrefix(file, "npc") || !strings.HasSuffix(file, ".txt") {
+			continue
+		}
+		data, err := s.config.LoadFile("npcs/" + file)
+		if err != nil {
+			continue
+		}
+		npc := parseDatabaseNPC(string(data))
+		if npc == nil {
+			continue
+		}
+		if !s.AddNPC(npc) {
+			s.logger.Warning("Could not add database NPC %s (id=%d)", npc.npcName, npc.id)
+			continue
+		}
+		if print {
+			s.log("       " + npc.npcName + "\n")
+		}
+	}
+}
+func (s *Server) loadTranslations() {}
 func (s *Server) loadWordFilter() {
 	s.wordFilter.load("config/wordfilter.txt")
 }
@@ -803,7 +967,7 @@ func (s *Server) sendPacketToType(playerType int, data []byte) {
 	s.playerMu.RLock()
 	defer s.playerMu.RUnlock()
 	for _, p := range s.players {
-		if p.playerType == playerType || p.playerType == PLTYPE_RC || p.playerType == PLTYPE_RC2 || p.playerType == PLTYPE_ANYRC {
+		if p != nil && p.playerType&playerType != 0 {
 			p.sendPacket(data)
 		}
 	}
@@ -831,9 +995,16 @@ func (s *Server) sendPacketToAll(data []byte, excludeId uint16) {
 func (s *Server) AddNPC(npc *NPC) bool {
 	s.npcMu.Lock()
 	defer s.npcMu.Unlock()
-	npc.setId(s.npcIdGen)
-	s.npcs[s.npcIdGen] = npc
-	s.npcIdGen++
+	if npc.id == 0 {
+		npc.setId(s.npcIdGen)
+	}
+	if _, exists := s.npcs[npc.id]; exists {
+		return false
+	}
+	s.npcs[npc.id] = npc
+	if npc.id >= s.npcIdGen {
+		s.npcIdGen = npc.id + 1
+	}
 	return true
 }
 func (s *Server) DeleteNPC(id uint32) bool {
@@ -845,7 +1016,7 @@ func (s *Server) DeleteNPC(id uint32) bool {
 	}
 	return false
 }
-func (s *Server) GetNPC(id uint32) *NPC { s.npcMu.RLock(); defer s.npcMu.Unlock(); return s.npcs[id] }
+func (s *Server) GetNPC(id uint32) *NPC { s.npcMu.RLock(); defer s.npcMu.RUnlock(); return s.npcs[id] }
 
 func (s *Server) GetLevel(name string) *Level {
 	s.levelMu.RLock()
@@ -1034,6 +1205,7 @@ func (a *Account) LoadAccount(accountName string, ignoreNick bool) bool {
 	a.flagList = make(map[string]string)
 	a.weaponList = []string{}
 	a.chestList = []string{}
+	a.folderList = []string{}
 	for i := 1; i < len(lines); i++ {
 		line := trimSpace(lines[i])
 		if line == "" {
@@ -1441,6 +1613,8 @@ func (p *Player) processPackets() {
 				p.sendPostLoginTail()
 			} else if p.playerType&PLTYPE_ANYRC != 0 {
 				p.sendRCPostLoginTail()
+			} else if p.playerType&PLTYPE_ANYNC != 0 {
+				p.sendNCPostLoginTail()
 			}
 			continue
 		}
@@ -1574,6 +1748,65 @@ func (p *Player) sendRCPostLoginTail() {
 		if len(props) > 0 {
 			p.sendPacket(append(other.otherPropsPacket(props), '\n'))
 		}
+	}
+}
+
+func (p *Player) sendNCPostLoginTail() {
+	p.sendNCNPCList()
+	p.sendNCClassList()
+
+	p.server.playerMu.RLock()
+	for _, other := range p.server.players {
+		if other != nil && other != p && other.playerType&PLTYPE_ANYNC != 0 && other.isLoggedIn() {
+			p.sendPLO_RC_CHAT("New NC: " + other.accountName)
+		}
+	}
+	p.server.playerMu.RUnlock()
+	p.server.sendPacketToType(PLTYPE_ANYNC, rcChatPacket("New NC: "+p.accountName))
+}
+
+func (p *Player) sendNCNPCList() {
+	p.server.npcMu.RLock()
+	npcs := make([]*NPC, 0, len(p.server.npcs))
+	for _, npc := range p.server.npcs {
+		if npc != nil && npc.npcType == DBNPC {
+			npcs = append(npcs, npc)
+		}
+	}
+	p.server.npcMu.RUnlock()
+	for _, npc := range npcs {
+		p.sendNCNPCAdd(npc)
+	}
+}
+
+func (p *Player) sendNCNPCAdd(npc *NPC) {
+	levelName := ""
+	if npc.level != nil {
+		levelName = npc.level.levelName
+	}
+	buf := NewBuffer()
+	buf.WriteByte(PLO_NC_NPCADD)
+	buf.WriteGInt(npc.id)
+	buf.WriteByte(byte(NPCPROP_NAME))
+	buf.WriteGString(npc.npcName)
+	buf.WriteByte(byte(NPCPROP_TYPE))
+	buf.WriteGString(npc.scriptType)
+	buf.WriteByte(byte(NPCPROP_CURLEVEL))
+	buf.WriteGString(levelName)
+	p.send(buf)
+}
+
+func (p *Player) sendNCClassList() {
+	buf := NewBuffer()
+	buf.WriteByte(PLO_NC_CLASSADD)
+	p.server.weaponMu.RLock()
+	for className := range p.server.classes {
+		buf.Write([]byte(className))
+		buf.WriteByte('\n')
+	}
+	p.server.weaponMu.RUnlock()
+	if buf.Len() > 1 {
+		p.send(buf)
 	}
 }
 
@@ -1900,6 +2133,8 @@ func (p *Player) handlePacket(packet []byte) bool {
 		return p.msgPLI_RC_LARGEFILEEND(packet)
 	case PLI_RC_FOLDERDELETE:
 		return p.msgPLI_RC_FOLDERDELETE(packet)
+	case PLI_NC_LISTNPCS:
+		return p.msgPLI_NC_LISTNPCS(packet)
 	case PLI_NC_NPCGET:
 		return p.msgPLI_NC_NPCGET(packet)
 	case PLI_NC_NPCDELETE:
@@ -2137,6 +2372,12 @@ func (p *Player) handleLogin(packet []byte) bool {
 		p.sendCompress(true)
 		p.loaded = true
 		p.server.logger.Info("[%s] RC logged in (type=%d)", account, clientType)
+		return true
+	}
+	if clientType&PLTYPE_ANYNC != 0 {
+		p.sendCompress(true)
+		p.loaded = true
+		p.server.logger.Info("[%s] NC logged in (type=%d)", account, clientType)
 		return true
 	}
 	p.server.logger.Info("Sending login props (PLO_PLAYERPROPS)...")
@@ -2488,6 +2729,38 @@ func (p *Player) applyServerOptionsStaffRights() {
 	if strings.TrimSpace(p.adminIp) == "" || p.adminIp == "0.0.0.0" {
 		p.adminIp = "*.*.*.*"
 	}
+	if len(p.folderList) == 0 {
+		p.folderList = p.server.defaultRCFolderRights()
+	}
+}
+
+func (s *Server) defaultRCFolderRights() []string {
+	lines, err := s.config.LoadFileAsLines("config/foldersconfig.txt")
+	if err != nil {
+		return nil
+	}
+	folders := make([]string, 0, len(lines))
+	seen := make(map[string]bool)
+	for _, line := range lines {
+		line = trimSpace(line)
+		if line == "" || line[0] == '#' || line[0] == '/' {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		path := strings.Join(parts[1:], " ")
+		if strings.Contains(path, "..") || strings.Contains(path, ":") {
+			continue
+		}
+		entry := "rw " + strings.ReplaceAll(path, "\\", "/")
+		if !seen[entry] {
+			folders = append(folders, entry)
+			seen[entry] = true
+		}
+	}
+	return folders
 }
 
 func serverOptionsStaffContains(staffList, accountName string) bool {
@@ -5364,7 +5637,12 @@ func (p *Player) msgPLI_RC_FILEBROWSER_START(packet []byte) bool {
 		return true
 	}
 	if len(p.folderList) == 0 {
-		return true
+		if p.hasRight(PLPERM_SETFOLDERRIGHTS) || p.hasRight(PLPERM_SETFOLDEROPTIONS) {
+			p.folderList = p.server.defaultRCFolderRights()
+		}
+		if len(p.folderList) == 0 {
+			return true
+		}
 	}
 	var folders string
 	for _, folder := range p.folderList {
@@ -5415,6 +5693,9 @@ func (p *Player) rcFolderMap() map[string]string {
 			if idx := strings.LastIndex(folderPath, "/"); idx != -1 {
 				wild = folderPath[idx+1:]
 				folderPath = folderPath[:idx+1]
+			} else if strings.ContainsAny(folderPath, "*?") {
+				wild = folderPath
+				folderPath = ""
 			}
 		}
 		folderMap[folderPath] += rights + ":" + wild + "\n"
@@ -5755,8 +6036,18 @@ func (p *Player) msgPLI_RC_FOLDERDELETE(packet []byte) bool {
 	p.server.logger.Info("%s deleted folder %s", p.accountName, folder)
 	return true
 }
+
+func (p *Player) msgPLI_NC_LISTNPCS(packet []byte) bool {
+	if p.playerType&PLTYPE_ANYNC == 0 {
+		p.server.logger.Warning("[Hack] %s attempted LISTNPCS (non-NC)", p.accountName)
+		return true
+	}
+	p.sendNCNPCList()
+	return true
+}
+
 func (p *Player) msgPLI_NC_NPCGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCGET (non-NC)", p.accountName)
 		return true
 	}
@@ -5784,7 +6075,7 @@ func (p *Player) msgPLI_NC_NPCGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCDELETE(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCDELETE (non-NC)", p.accountName)
 		return true
 	}
@@ -5803,7 +6094,7 @@ func (p *Player) msgPLI_NC_NPCDELETE(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCRESET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCRESET (non-NC)", p.accountName)
 		return true
 	}
@@ -5817,7 +6108,7 @@ func (p *Player) msgPLI_NC_NPCRESET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCSCRIPTGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCSCRIPTGET (non-NC)", p.accountName)
 		return true
 	}
@@ -5836,7 +6127,7 @@ func (p *Player) msgPLI_NC_NPCSCRIPTGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCWARP(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCWARP (non-NC)", p.accountName)
 		return true
 	}
@@ -5857,7 +6148,7 @@ func (p *Player) msgPLI_NC_NPCWARP(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCFLAGSGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCFLAGSGET (non-NC)", p.accountName)
 		return true
 	}
@@ -5874,7 +6165,7 @@ func (p *Player) msgPLI_NC_NPCFLAGSGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCSCRIPTSET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCSCRIPTSET (non-NC)", p.accountName)
 		return true
 	}
@@ -5890,14 +6181,14 @@ func (p *Player) msgPLI_NC_NPCSCRIPTSET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_NPCFLAGSSET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCFLAGSSET (non-NC)", p.accountName)
 		return true
 	}
 	return true
 }
 func (p *Player) msgPLI_NC_NPCADD(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted NPCADD (non-NC)", p.accountName)
 		return true
 	}
@@ -5940,7 +6231,7 @@ func (p *Player) msgPLI_NC_NPCADD(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_CLASSEDIT(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted CLASSEDIT (non-NC)", p.accountName)
 		return true
 	}
@@ -5961,7 +6252,7 @@ func (p *Player) msgPLI_NC_CLASSEDIT(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_CLASSADD(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted CLASSADD (non-NC)", p.accountName)
 		return true
 	}
@@ -5984,7 +6275,7 @@ func (p *Player) msgPLI_NC_CLASSADD(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_LOCALNPCSGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted LOCALNPCSGET (non-NC)", p.accountName)
 		return true
 	}
@@ -6011,7 +6302,7 @@ func (p *Player) msgPLI_NC_LOCALNPCSGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_WEAPONLISTGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted WEAPONLISTGET (non-NC)", p.accountName)
 		return true
 	}
@@ -6028,7 +6319,7 @@ func (p *Player) msgPLI_NC_WEAPONLISTGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_WEAPONGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted WEAPONGET (non-NC)", p.accountName)
 		return true
 	}
@@ -6048,7 +6339,7 @@ func (p *Player) msgPLI_NC_WEAPONGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted WEAPONADD (non-NC)", p.accountName)
 		return true
 	}
@@ -6078,7 +6369,7 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_WEAPONDELETE(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted WEAPONDELETE (non-NC)", p.accountName)
 		return true
 	}
@@ -6096,7 +6387,7 @@ func (p *Player) msgPLI_NC_WEAPONDELETE(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_CLASSDELETE(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted CLASSDELETE (non-NC)", p.accountName)
 		return true
 	}
@@ -6118,7 +6409,7 @@ func (p *Player) msgPLI_NC_CLASSDELETE(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_NC_LEVELLISTGET(packet []byte) bool {
-	if p.playerType != PLTYPE_NPCSERVER {
+	if p.playerType&PLTYPE_ANYNC == 0 {
 		p.server.logger.Warning("[Hack] %s attempted LEVELLISTGET (non-NC)", p.accountName)
 		return true
 	}

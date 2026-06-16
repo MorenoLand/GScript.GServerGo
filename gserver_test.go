@@ -101,6 +101,71 @@ func TestLoadSettingsSyncsNPCServerPlayer(t *testing.T) {
 	}
 }
 
+func TestLoadNpcsLoadsControlNPCWithSavedID(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "npcs/npcControl-NPC.txt", ""+
+		"GRNPC001\n"+
+		"NAME Control-NPC\n"+
+		"ID 10000\n"+
+		"TYPE CONTROL\n"+
+		"STARTLEVEL onlinestartlocal.nw\n"+
+		"STARTX 30.00\n"+
+		"STARTY 30.50\n"+
+		"NPCSCRIPT\n"+
+		"function onCreated() {\n"+
+		"  server.sendtorc(\"Script Server Initialized!\");\n"+
+		"}\n"+
+		"NPCSCRIPTEND\n")
+
+	server.loadNpcs(false)
+
+	npc := server.GetNPC(10000)
+	if npc == nil {
+		t.Fatalf("Control-NPC was not loaded at saved id 10000")
+	}
+	if npc.npcName != "Control-NPC" || npc.scriptType != "CONTROL" {
+		t.Fatalf("loaded npc name/type = %q/%q", npc.npcName, npc.scriptType)
+	}
+	if !strings.Contains(npc.script, "Script Server Initialized") {
+		t.Fatalf("loaded npc script = %q", npc.script)
+	}
+	if server.npcIdGen != 10001 {
+		t.Fatalf("npcIdGen = %d, want 10001", server.npcIdGen)
+	}
+}
+
+func TestNCListNPCsSendsDatabaseNPCsToNCConnection(t *testing.T) {
+	server := newLoginTestServer(t)
+	nc := NewPlayer(nil, server)
+	nc.playerType = PLTYPE_NC
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	npc := NewNPC(DBNPC)
+	npc.id = 10000
+	npc.npcName = "Control-NPC"
+	npc.scriptType = "CONTROL"
+	npc.level = &Level{levelName: "onlinestartlocal.nw"}
+	if !server.AddNPC(npc) {
+		t.Fatalf("AddNPC returned false")
+	}
+
+	nc.msgPLI_NC_LISTNPCS([]byte{PLI_NC_LISTNPCS})
+
+	want := NewBuffer()
+	want.WriteByte(PLO_NC_NPCADD + 32)
+	want.WriteGInt(10000)
+	want.WriteByte(byte(NPCPROP_NAME))
+	want.WriteGString("Control-NPC")
+	want.WriteByte(byte(NPCPROP_TYPE))
+	want.WriteGString("CONTROL")
+	want.WriteByte(byte(NPCPROP_CURLEVEL))
+	want.WriteGString("onlinestartlocal.nw")
+	want.WriteByte('\n')
+	if !bytes.Contains(nc.outQueue, want.Bytes()) {
+		t.Fatalf("NC list payload = % X, want to contain % X", nc.outQueue, want.Bytes())
+	}
+}
+
 func TestRC2LoginReadsEncryptionKeyAndSkipsGameWorldLogin(t *testing.T) {
 	server := newLoginTestServer(t)
 	p := NewPlayer(nil, server)
@@ -468,6 +533,10 @@ func TestAccountIPFromRemoteAddress(t *testing.T) {
 func TestRCLoginAppliesServerOptionsStaffRights(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.settings.Set("staff", "(Manager),moondeath")
+	writeTestFile(t, server.config.GetBasePath(), "config/foldersconfig.txt", ""+
+		"# Folder Configuration\n"+
+		"level *.nw\n"+
+		"level levels/*.graal\n")
 	account := "" +
 		"GRACC001\n" +
 		"NICK moondeath\n" +
@@ -494,6 +563,32 @@ func TestRCLoginAppliesServerOptionsStaffRights(t *testing.T) {
 	}
 	if p.adminIp != "*.*.*.*" {
 		t.Fatalf("adminIp = %q, want wildcard", p.adminIp)
+	}
+	if got, want := strings.Join(p.folderList, "\n"), "rw *.nw\nrw levels/*.graal"; got != want {
+		t.Fatalf("folderList = %q, want %q", got, want)
+	}
+}
+
+func TestRCFileBrowserUsesFolderConfigFallbackAndRootWildcard(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "config/foldersconfig.txt", ""+
+		"level *.nw\n"+
+		"level levels/*.graal\n")
+	writeTestFile(t, server.config.GetBasePath(), "start.nw", "level")
+	writeTestFile(t, server.config.GetBasePath(), "levels/test.graal", "level")
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.adminRights = allLocalRights()
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	rc.msgPLI_RC_FILEBROWSER_START([]byte{PLI_RC_FILEBROWSER_START})
+
+	if !bytes.Contains(rc.outQueue, []byte("start.nw")) {
+		t.Fatalf("file browser output missing root wildcard file: % X", rc.outQueue)
+	}
+	if !bytes.Contains(rc.outQueue, []byte("rw *.nw")) {
+		t.Fatalf("file browser dirlist missing derived root folder right: % X", rc.outQueue)
 	}
 }
 
