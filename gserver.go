@@ -6567,14 +6567,14 @@ func (p *Player) msgPLI_REQUESTTEXT(packet []byte) bool {
 				"autobill=1\x01autobillmine=1\x01bundle=1\x01creationtime=1212768763\x01currenttime=1353248504\x01description=Gives\x01duration=2629800\x01flags=subscription\x01icon=graalicon_big.png\x01itemid=1\x01lifetime=1\x01owner=global\x01ownertype=server\x01price=100\x01quantity=988506\x01status=available\x01title=Gold\x01tradable=1\x01typeid=62\x01world=global")
 		} else if option == "serverinfo" {
 			if p.server.serverList != nil && p.server.serverList.connected {
-				p.server.serverList.SendTextPacket(SVO_REQUESTSVRINFO, rawText)
+				p.server.serverList.SendPlayerTextPacket(SVO_REQUESTSVRINFO, p.id, rawText)
 			} else {
 				p.sendServerTextFields(weapon, type_, option, p.server.name)
 			}
 		}
 	} else if type_ == "pmservers" || type_ == "pmguilds" {
 		if p.server.serverList != nil && p.server.serverList.connected {
-			p.server.serverList.SendTextPacket(SVO_REQUESTLIST, rawText)
+			p.server.serverList.SendPlayerTextPacket(SVO_REQUESTLIST, p.id, rawText)
 		} else {
 			p.sendServerTextFields(weapon, type_, option)
 		}
@@ -6616,7 +6616,7 @@ func (p *Player) msgPLI_SENDTEXT(packet []byte) bool {
 		option := parts[2]
 		if option == "verifybuddies" || option == "addbuddy" || option == "deletebuddy" {
 			if p.server.serverList != nil && p.server.serverList.connected {
-				p.server.serverList.SendTextPacket(SVO_SENDTEXT, rawText)
+				p.server.serverList.SendPlayerTextPacket(SVO_REQUESTLIST, p.id, rawText)
 			}
 		}
 	}
@@ -8667,6 +8667,10 @@ func (sl *ServerList) handleListPacket(packetId uint8, data []byte) {
 	case SVI_FILEEND, SVI_FILEEND2, SVI_FILEEND3:
 	case SVI_SERVERINFO:
 		sl.server.logger.Debug("Server info received")
+	case SVI_REQUESTTEXT:
+		sl.handleRequestText(data)
+	case SVI_SENDTEXT:
+		sl.handleSendText(data)
 	case SVI_ERRMSG:
 		sl.server.logger.Error("List server error: %s", string(data))
 	case SVI_PING:
@@ -8711,6 +8715,35 @@ func (sl *ServerList) SendTextPacket(packetId byte, text string) {
 	buf := NewBuffer()
 	buf.WriteGChar(packetId).Write([]byte(text))
 	sl.sendPacket(buf.Bytes())
+}
+
+func (sl *ServerList) SendPlayerTextPacket(packetId byte, playerID uint16, text string) {
+	if !sl.connected {
+		return
+	}
+	buf := NewBuffer()
+	buf.WriteGChar(packetId).WriteGShort(playerID).Write([]byte(text))
+	sl.sendPacket(buf.Bytes())
+}
+
+func (sl *ServerList) handleRequestText(data []byte) {
+	if len(data) < 2 || sl.server == nil {
+		return
+	}
+	buf := NewBufferFromBytes(data)
+	playerID := buf.ReadGShort()
+	message := data[buf.read:]
+	player := sl.server.GetPlayer(playerID)
+	if player == nil {
+		return
+	}
+	out := NewBuffer()
+	out.WriteByte(PLO_SERVERTEXT).Write(message)
+	player.send(out)
+}
+
+func (sl *ServerList) handleSendText(data []byte) {
+	sl.server.logger.Debug("[LISTSERVER] SENDTEXT: %s", string(data))
 }
 
 func (sl *ServerList) sendPacket(packet []byte) {

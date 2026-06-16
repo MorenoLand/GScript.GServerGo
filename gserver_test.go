@@ -4807,6 +4807,75 @@ func TestRequestTextRespondsLocallyWhenListserverUnavailable(t *testing.T) {
 	}
 }
 
+func TestRequestTextForwardsListRequestWithPlayerId(t *testing.T) {
+	server := &Server{logger: NewLogger("", false)}
+	sl := &ServerList{
+		server:    server,
+		connected: true,
+		enabled:   true,
+		codec:     ENCRYPT_GEN_1,
+		sendQueue: make(chan []byte, 1),
+	}
+	server.serverList = sl
+	p := &Player{id: 321, server: server}
+
+	request := "GraalEngine\x01pmservers\x01all\x01"
+	if !p.msgPLI_REQUESTTEXT(append([]byte{PLI_REQUESTTEXT}, []byte(request)...)) {
+		t.Fatal("msgPLI_REQUESTTEXT returned false")
+	}
+
+	got := <-sl.sendQueue
+	want := NewBuffer().
+		WriteGChar(SVO_REQUESTLIST).
+		WriteGShort(321).
+		Write([]byte(request)).
+		WriteByte('\n').
+		Bytes()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("forwarded list request = % X, want % X", got, want)
+	}
+}
+
+func TestServerListRequestTextRelaysToPlayer(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
+	p := &Player{
+		id:         321,
+		conn:       serverConn,
+		server:     server,
+		encryption: *NewEncryption(),
+	}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[p.id] = p
+	sl := &ServerList{server: server}
+
+	message := "GraalEngine\x01pmservers\x01all\x01server-data\x01"
+	data := NewBuffer().WriteGShort(p.id).Write([]byte(message)).Bytes()
+	done := make(chan struct{}, 1)
+	go func() {
+		sl.handleListPacket(SVI_REQUESTTEXT, data)
+		done <- struct{}{}
+	}()
+
+	want := append([]byte{PLO_SERVERTEXT + 32}, []byte(message)...)
+	want = append(want, '\n')
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read relayed server text: %v", err)
+	}
+	<-done
+	if !bytes.Equal(got, want) {
+		t.Fatalf("relayed server text = % X, want % X", got, want)
+	}
+}
+
 func TestNewWorldTimeUsesGInt4WireFormat(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()

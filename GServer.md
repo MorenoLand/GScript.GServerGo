@@ -1248,6 +1248,7 @@ The GServer maintains a persistent TCP connection to a list server for authentic
 - After the initial registration switches to the compressed listserver codec, outbound SVO packets must still be encoded through that active codec. Do not enqueue raw packet bytes directly.
 - `SVO_SENDTEXT` carries raw text immediately after the encoded packet id. Do not use a length-prefixed string for text such as `Listserver,settings,allowedversions,...`.
 - Allowed client versions are reported with `SVO_SENDTEXT` using `Listserver,settings,allowedversions,` followed by the comma-separated values loaded from `config/allowedversions.txt`.
+- Per-player listserver text requests such as `SVO_REQUESTLIST` and `SVO_REQUESTSVRINFO` carry `GUShort player_id` immediately after the encoded packet id, followed by the tokenized text payload. Matching `SVI_REQUESTTEXT` replies also begin with `GUShort player_id`, then the text payload relayed to that player as `PLO_SERVERTEXT`.
 - The hub/listserver sends `SVI_PING` for latency measurement; respond with the existing ping response path. To keep an idle socket from going stale without skewing latency, periodically resend `SVO_SETIP` using the configured `serverip` value or `AUTO`.
 
 ---
