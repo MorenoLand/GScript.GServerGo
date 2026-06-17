@@ -57,8 +57,8 @@ var playerPropsRC = [PROPCOUNT]bool{
 
 func (p *Player) getPropsRC() []byte {
 	ret := NewBuffer()
-	ret.WriteString8(p.accountName)
-	ret.WriteString8("main")
+	ret.WriteString8Encoded(p.accountName)
+	ret.WriteString8Encoded("main")
 
 	props := NewBuffer()
 	for propId, enabled := range playerPropsRC {
@@ -72,10 +72,10 @@ func (p *Player) getPropsRC() []byte {
 	if len(propData) > 255 {
 		propData = propData[:255]
 	}
-	ret.WriteByte(byte(len(propData)))
+	ret.WriteGChar(byte(len(propData)))
 	ret.Write(propData)
 
-	ret.WriteShort(int16(len(p.flagList)))
+	ret.WriteGShort(uint16(len(p.flagList)))
 	for flag, value := range p.flagList {
 		flagText := flag
 		if value != "" {
@@ -84,25 +84,25 @@ func (p *Player) getPropsRC() []byte {
 		if len(flagText) > 0xDF {
 			flagText = flagText[:0xDF]
 		}
-		ret.WriteString8(flagText)
+		ret.WriteString8Encoded(flagText)
 	}
 
-	ret.WriteShort(int16(len(p.chestList)))
+	ret.WriteGShort(uint16(len(p.chestList)))
 	for _, chest := range p.chestList {
 		parts := strings.SplitN(chest, ":", 3)
 		if len(parts) != 3 {
 			continue
 		}
 		chestData := NewBuffer()
-		chestData.WriteByte(byte(atoi(parts[0])))
-		chestData.WriteByte(byte(atoi(parts[1])))
+		chestData.WriteGChar(byte(atoi(parts[0])))
+		chestData.WriteGChar(byte(atoi(parts[1])))
 		chestData.Write([]byte(parts[2]))
-		ret.WriteString8(string(chestData.Bytes()))
+		ret.WriteString8Encoded(string(chestData.Bytes()))
 	}
 
-	ret.WriteByte(byte(len(p.weaponList)))
+	ret.WriteGChar(byte(len(p.weaponList)))
 	for _, weapon := range p.weaponList {
-		ret.WriteString8(weapon)
+		ret.WriteString8Encoded(weapon)
 	}
 	return ret.Bytes()
 }

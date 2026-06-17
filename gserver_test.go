@@ -1602,7 +1602,7 @@ func TestRCPlayerPropsGet2NetworkPayloadStripsPacketID(t *testing.T) {
 		t.Fatal("msgPLI_RC_PLAYERPROPSGET2 returned false")
 	}
 
-	want := append([]byte{PLO_RC_PLAYERPROPSGET + 32}, NewBuffer().WriteShort(int16(target.id)).Bytes()...)
+	want := append([]byte{PLO_RC_PLAYERPROPSGET + 32}, NewBuffer().WriteGShort(target.id).Bytes()...)
 	if !bytes.Contains(rc.outQueue, want) {
 		t.Fatalf("player props response = % X, want prefix % X", rc.outQueue, want)
 	}
@@ -1643,16 +1643,16 @@ func TestRCPlayerPropsGet2SendsLoadedAccountProps(t *testing.T) {
 		t.Fatalf("player props packet = % X", rc.outQueue)
 	}
 	buf := NewBufferFromBytes(payload[1:])
-	if got := buf.ReadShort(); got != int16(target.id) {
+	if got := buf.ReadGShort(); got != target.id {
 		t.Fatalf("player id = %d, want %d", got, target.id)
 	}
-	if got := string(buf.ReadBytes(int(buf.ReadByte()))); got != "moondeath" {
+	if got := string(buf.ReadBytes(int(buf.ReadGChar()))); got != "moondeath" {
 		t.Fatalf("account = %q, want moondeath", got)
 	}
-	if got := string(buf.ReadBytes(int(buf.ReadByte()))); got != "main" {
+	if got := string(buf.ReadBytes(int(buf.ReadGChar()))); got != "main" {
 		t.Fatalf("world = %q, want main", got)
 	}
-	propsLen := int(buf.ReadByte())
+	propsLen := int(buf.ReadGChar())
 	props := buf.ReadBytes(propsLen)
 	killsProp := append([]byte{PLPROP_KILLSCOUNT + 32}, NewBuffer().WriteGInt(12).Bytes()...)
 	accountProp := append([]byte{PLPROP_ACCOUNTNAME + 32}, NewBuffer().WriteString8Encoded("moondeath").Bytes()...)
@@ -1676,7 +1676,7 @@ func TestRCPlayerPropsGet3ParsesString8AccountName(t *testing.T) {
 	rc.queueOutgoing = true
 	rc.encryption.SetGen(ENCRYPT_GEN_1)
 
-	packet := append([]byte{PLI_RC_PLAYERPROPSGET3, byte(len("moondeath"))}, []byte("moondeath")...)
+	packet := append([]byte{PLI_RC_PLAYERPROPSGET3}, NewBuffer().WriteString8Encoded("moondeath").Bytes()...)
 	if !rc.msgPLI_RC_PLAYERPROPSGET3(packet) {
 		t.Fatal("msgPLI_RC_PLAYERPROPSGET3 returned false")
 	}
@@ -1700,13 +1700,48 @@ func TestRCPlayerRightsGetNetworkPayloadUsesRawAccountAndGInt5Rights(t *testing.
 
 	want := NewBuffer()
 	want.WriteByte(PLO_RC_PLAYERRIGHTSGET + 32)
-	want.WriteString8("Admin")
+	want.WriteString8Encoded("Admin")
 	want.WriteGInt5(1)
-	want.WriteString8("")
-	want.WriteShort(0)
+	want.WriteString8Encoded("")
+	want.WriteGShort(0)
 	want.WriteByte('\n')
 	if !bytes.Contains(rc.outQueue, want.Bytes()) {
 		t.Fatalf("rights response = % X, want % X", rc.outQueue, want.Bytes())
+	}
+}
+
+func TestRCPlayerRightsGetResponseUsesRCEncodedFields(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", ""+
+		"GRACC001\n"+
+		"NICK moondeath\n"+
+		"LOCALRIGHTS 255\n"+
+		"IPRANGE 127.0.0.1\n"+
+		"FOLDERRIGHT rw *.nw\n")
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETRIGHTS
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	if !rc.msgPLI_RC_PLAYERRIGHTSGET(append([]byte{PLI_RC_PLAYERRIGHTSGET}, []byte("moondeath")...)) {
+		t.Fatal("msgPLI_RC_PLAYERRIGHTSGET returned false")
+	}
+
+	payload := bytes.TrimSuffix(rc.outQueue, []byte{'\n'})
+	buf := NewBufferFromBytes(payload)
+	if got := buf.ReadByte(); got != PLO_RC_PLAYERRIGHTSGET+32 {
+		t.Fatalf("packet id = %d, want %d", got, PLO_RC_PLAYERRIGHTSGET+32)
+	}
+	account := string(buf.ReadBytes(int(buf.ReadGChar())))
+	rights := int(buf.ReadGInt5())
+	adminIP := string(buf.ReadBytes(int(buf.ReadGChar())))
+	foldersLen := int(buf.ReadGShort())
+	folders := string(buf.ReadBytes(foldersLen))
+
+	if account != "moondeath" || rights != 255 || adminIP != "127.0.0.1" || folders != "\"rw *.nw\"" {
+		t.Fatalf("decoded rights packet = account=%q rights=%d ip=%q folders=%q", account, rights, adminIP, folders)
 	}
 }
 
@@ -1751,11 +1786,11 @@ func TestRCPlayerRightsSetReadsGInt5Rights(t *testing.T) {
 
 	packet := NewBuffer()
 	packet.WriteByte(PLI_RC_PLAYERRIGHTSSET)
-	packet.WriteString8("moondeath")
+	packet.WriteString8Encoded("moondeath")
 	packet.WriteGInt5(uint64(PLPERM_NPCCONTROL | PLPERM_SETRIGHTS))
-	packet.WriteString8("127.0.0.1")
+	packet.WriteString8Encoded("127.0.0.1")
 	folders := gtokenizeText("rw *.nw")
-	packet.WriteShort(int16(len(folders)))
+	packet.WriteGShort(uint16(len(folders)))
 	packet.Write([]byte(folders))
 	if !rc.msgPLI_RC_PLAYERRIGHTSSET(packet.Bytes()) {
 		t.Fatal("msgPLI_RC_PLAYERRIGHTSSET returned false")
@@ -1790,7 +1825,7 @@ func TestRCPlayerCommentsGetNetworkPayloadUsesRawComments(t *testing.T) {
 		t.Fatal("msgPLI_RC_PLAYERCOMMENTSGET returned false")
 	}
 
-	want := append([]byte{PLO_RC_PLAYERCOMMENTSGET + 32}, byte(len("Admin")))
+	want := append([]byte{PLO_RC_PLAYERCOMMENTSGET + 32}, byte(len("Admin")+32))
 	want = append(want, []byte("Admin")...)
 	want = append(want, []byte("saved comment")...)
 	want = append(want, '\n')
@@ -1908,7 +1943,7 @@ func TestRCChatOpenRightsDispatchesCommand(t *testing.T) {
 	if bytes.Contains(rc.outQueue, []byte("Admin: /openrights moondeath")) {
 		t.Fatalf("openrights command was echoed to RC chat: % X", rc.outQueue)
 	}
-	want := append([]byte{PLO_RC_PLAYERRIGHTSGET + 32}, []byte{byte(len("moondeath"))}...)
+	want := append([]byte{PLO_RC_PLAYERRIGHTSGET + 32}, []byte{byte(len("moondeath") + 32)}...)
 	want = append(want, []byte("moondeath")...)
 	if !bytes.Contains(rc.outQueue, want) {
 		t.Fatalf("openrights did not dispatch rights packet: % X, want prefix % X", rc.outQueue, want)
@@ -2031,7 +2066,7 @@ func TestRCServerFlagsGetUsesSingleString8Length(t *testing.T) {
 
 	rc.msgPLI_RC_SERVERFLAGSGET([]byte{PLI_RC_SERVERFLAGSGET})
 
-	want := []byte{PLO_RC_SERVERFLAGSGET + 32, 0, 1, byte(len("test=true"))}
+	want := []byte{PLO_RC_SERVERFLAGSGET + 32, 0x20, 0x21, byte(len("test=true") + 32)}
 	want = append(want, []byte("test=true")...)
 	want = append(want, '\n')
 	if !bytes.Equal(rc.outQueue, want) {

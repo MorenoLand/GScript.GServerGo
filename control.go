@@ -29,6 +29,9 @@ func readRCAccountPayload(packet []byte, packetId byte) string {
 	if len(payload) == 0 {
 		return ""
 	}
+	if account := readRCEncodedStringPayload(payload); account != "" {
+		return sanitizeRCAccountName(account)
+	}
 	buf := NewBufferFromBytes(payload)
 	if account := buf.ReadGString(); account != "" {
 		return sanitizeRCAccountName(account)
@@ -41,17 +44,44 @@ func readRCString8AccountPayload(packet []byte, packetId byte) string {
 	if len(payload) == 0 {
 		return ""
 	}
+	if account := readRCEncodedStringPayload(payload); account != "" {
+		return sanitizeRCAccountName(account)
+	}
 	nameLen := int(payload[0])
-	if nameLen <= len(payload)-1 {
-		if accountName := sanitizeRCAccountName(string(payload[1 : 1+nameLen])); accountName != "" {
-			return accountName
-		}
+	if nameLen <= len(payload)-1 && payload[0] < 32 {
+		return sanitizeRCAccountName(string(payload[1 : 1+nameLen]))
 	}
 	buf := NewBufferFromBytes(payload)
 	if account := buf.ReadGString(); account != "" {
 		return sanitizeRCAccountName(account)
 	}
 	return sanitizeRCAccountName(string(payload))
+}
+
+func readRCEncodedStringPayload(payload []byte) string {
+	if len(payload) == 0 || payload[0] < 32 {
+		return ""
+	}
+	nameLen := int(payload[0] - 32)
+	if nameLen > len(payload)-1 {
+		return ""
+	}
+	return string(payload[1 : 1+nameLen])
+}
+
+func readRCEncodedString(buf *Buffer) string {
+	if buf == nil {
+		return ""
+	}
+	strLen := int(buf.ReadGChar())
+	if strLen > buf.Remaining() {
+		strLen = buf.Remaining()
+	}
+	return string(buf.ReadBytes(strLen))
+}
+
+func writeRCEncodedString(buf *Buffer, value string) {
+	buf.WriteString8Encoded(value)
 }
 
 func sanitizeRCAccountName(accountName string) string {
@@ -361,10 +391,10 @@ func (p *Player) msgPLI_RC_SERVERFLAGSGET(packet []byte) bool {
 		}
 		validFlags[flag] = value
 	}
-	buf.WriteShort(int16(len(validFlags)))
+	buf.WriteGShort(uint16(len(validFlags)))
 	for flag, value := range validFlags {
 		flagStr := flag + "=" + value
-		buf.WriteString8(flagStr)
+		writeRCEncodedString(buf, flagStr)
 	}
 	p.server.flagMu.RUnlock()
 	p.send(buf)
@@ -389,12 +419,7 @@ func (p *Player) msgPLI_RC_SERVERFLAGSSET(packet []byte) bool {
 	}
 	p.server.flags = make(map[string]string)
 	for i := 0; i < int(count); i++ {
-		flagLen := buf.ReadByte()
-		flagBytes := make([]byte, flagLen)
-		for j := range flagBytes {
-			flagBytes[j] = buf.ReadByte()
-		}
-		flagStr := string(flagBytes)
+		flagStr := readRCEncodedString(buf)
 		if idx := strings.Index(flagStr, "="); idx != -1 {
 			name := trimSpace(flagStr[:idx])
 			value := flagStr[idx+1:]
@@ -445,13 +470,13 @@ func (p *Player) msgPLI_RC_ACCOUNTADD(packet []byte) bool {
 		p.send(NewBufferFromBytes(rcChatPacket("Server: You are not authorized to create new accounts.")))
 		return true
 	}
-	buf := NewBufferFromBytes(packet[1:])
-	accountName := buf.ReadGString()
-	_ = buf.ReadGString()
-	email := buf.ReadGString()
-	banned := buf.ReadByte() != 0
-	loadOnly := buf.ReadByte() != 0
-	_ = buf.ReadByte()
+	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_ACCOUNTADD))
+	accountName := readRCEncodedString(buf)
+	_ = readRCEncodedString(buf)
+	email := readRCEncodedString(buf)
+	banned := buf.ReadGChar() != 0
+	loadOnly := buf.ReadGChar() != 0
+	_ = buf.ReadGChar()
 	account := &Account{server: p.server}
 	account.accountName = accountName
 	account.email = email
@@ -501,9 +526,9 @@ func (p *Player) msgPLI_RC_ACCOUNTLISTGET(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted ACCOUNTLISTGET (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet[1:])
-	name := buf.ReadGString()
-	_ = buf.ReadGString()
+	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_ACCOUNTLISTGET))
+	name := readRCEncodedString(buf)
+	_ = readRCEncodedString(buf)
 	name = strings.ReplaceAll(name, "%", "*")
 	if name == "" {
 		name = "*"
@@ -520,8 +545,7 @@ func (p *Player) msgPLI_RC_ACCOUNTLISTGET(packet []byte) bool {
 			accountName := strings.TrimSuffix(accountFile, ".txt")
 			matched, err := filepath.Match(name, accountName)
 			if err == nil && matched {
-				buf2.WriteByte(byte(len(accountName)))
-				buf2.WriteString8(accountName)
+				writeRCEncodedString(buf2, accountName)
 			}
 		}
 	}
@@ -545,7 +569,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSGET2(packet []byte) bool {
 	}
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERPROPSGET)
-	buf2.WriteShort(int16(targetPlayer.id))
+	buf2.WriteGShort(targetPlayer.id)
 	buf2.Write(targetPlayer.getPropsRC())
 	p.send(buf2)
 	return true
@@ -573,7 +597,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSGET3(packet []byte) bool {
 	}
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERPROPSGET)
-	buf2.WriteShort(int16(targetPlayer.id))
+	buf2.WriteGShort(targetPlayer.id)
 	buf2.Write(targetPlayer.getPropsRC())
 	p.send(buf2)
 	return true
@@ -648,14 +672,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSSET2(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_RC_ACCOUNTGET(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountName := buf.ReadGString()
-	if idx := strings.Index(accountName, "/"); idx != -1 {
-		accountName = accountName[:idx]
-	}
-	if idx := strings.Index(accountName, "\\"); idx != -1 {
-		accountName = accountName[:idx]
-	}
+	accountName := readRCAccountPayload(packet, PLI_RC_ACCOUNTGET)
 	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
 		p.server.logger.Warning("[Hack] %s attempted ACCOUNTGET (non-RC): %s", p.accountName, accountName)
 		return true
@@ -673,30 +690,29 @@ func (p *Player) msgPLI_RC_ACCOUNTGET(packet []byte) bool {
 	}
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_ACCOUNTGET)
-	buf2.WriteString8(accountName)
-	buf2.WriteByte(0)
-	buf2.WriteString8(targetPlayer.email)
+	writeRCEncodedString(buf2, accountName)
+	buf2.WriteGChar(0)
+	writeRCEncodedString(buf2, targetPlayer.email)
 	banned := byte(0)
 	if targetPlayer.isBanned {
 		banned = 1
 	}
-	buf2.WriteByte(banned)
+	buf2.WriteGChar(banned)
 	loadOnly := byte(0)
 	if targetPlayer.isLoadOnly {
 		loadOnly = 1
 	}
-	buf2.WriteByte(loadOnly)
-	buf2.WriteByte(0)
-	buf2.WriteString8("main")
-	buf2.WriteString8(targetPlayer.banLength)
-	buf2.WriteString8(targetPlayer.banReason)
+	buf2.WriteGChar(loadOnly)
+	buf2.WriteGChar(0)
+	writeRCEncodedString(buf2, "main")
+	writeRCEncodedString(buf2, targetPlayer.banLength)
+	writeRCEncodedString(buf2, targetPlayer.banReason)
 	p.send(buf2)
 	return true
 }
 func (p *Player) msgPLI_RC_ACCOUNTSET(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountNameLen := buf.ReadByte()
-	accountName := string(buf.ReadBytes(int(accountNameLen)))
+	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_ACCOUNTSET))
+	accountName := readRCEncodedString(buf)
 	if len(accountName) == 0 {
 		return true
 	}
@@ -715,17 +731,13 @@ func (p *Player) msgPLI_RC_ACCOUNTSET(packet []byte) bool {
 		p.send(NewBufferFromBytes(rcChatPacket("Server: You are not authorized to edit accounts.")))
 		return true
 	}
-	passwordLen := buf.ReadByte()
-	_ = string(buf.ReadBytes(int(passwordLen)))
-	emailLen := buf.ReadByte()
-	email := string(buf.ReadBytes(int(emailLen)))
-	banned := buf.ReadByte() != 0
-	loadOnly := buf.ReadByte() != 0
-	buf.ReadByte()
-	worldLen := buf.ReadByte()
-	_ = string(buf.ReadBytes(int(worldLen)))
-	banReasonLen := buf.ReadByte()
-	banReason := string(buf.ReadBytes(int(banReasonLen)))
+	_ = readRCEncodedString(buf)
+	email := readRCEncodedString(buf)
+	banned := buf.ReadGChar() != 0
+	loadOnly := buf.ReadGChar() != 0
+	buf.ReadGChar()
+	_ = readRCEncodedString(buf)
+	banReason := readRCEncodedString(buf)
 	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYCLIENT)
 	if targetPlayer == nil {
 		if !p.server.accountExists(accountName) {
@@ -881,18 +893,17 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSGET(packet []byte) bool {
 	folders := gtokenizeText(strings.Join(targetPlayer.folderList, "\n"))
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERRIGHTSGET)
-	buf2.WriteString8(accountName)
+	writeRCEncodedString(buf2, accountName)
 	buf2.WriteGInt5(uint64(targetPlayer.adminRights))
-	buf2.WriteString8(targetPlayer.adminIp)
-	buf2.WriteShort(int16(len(folders)))
+	writeRCEncodedString(buf2, targetPlayer.adminIp)
+	buf2.WriteGShort(uint16(len(folders)))
 	buf2.Write([]byte(folders))
 	p.send(buf2)
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERRIGHTSSET(packet []byte) bool {
 	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_PLAYERRIGHTSSET))
-	accountNameLen := buf.ReadByte()
-	accountName := string(buf.ReadBytes(int(accountNameLen)))
+	accountName := readRCEncodedString(buf)
 	if idx := strings.Index(accountName, "/"); idx != -1 {
 		accountName = accountName[:idx]
 	}
@@ -936,10 +947,9 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSSET(packet []byte) bool {
 		}
 	}
 	targetPlayer.adminRights = int(newAdminRights)
-	adminIpLen := buf.ReadByte()
-	adminIp := string(buf.ReadBytes(int(adminIpLen)))
+	adminIp := readRCEncodedString(buf)
 	targetPlayer.adminIp = adminIp
-	foldersLen := buf.ReadShort()
+	foldersLen := buf.ReadGShort()
 	folders := guntokenizeText(string(buf.ReadBytes(int(foldersLen))))
 	folderList := strings.Split(folders, "\n")
 	validFolders := []string{}
@@ -977,7 +987,7 @@ func (p *Player) msgPLI_RC_PLAYERCOMMENTSGET(packet []byte) bool {
 	}
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERCOMMENTSGET)
-	buf2.WriteString8(accountName)
+	writeRCEncodedString(buf2, accountName)
 	buf2.Write([]byte(targetPlayer.accountComments))
 	p.send(buf2)
 	return true
@@ -992,9 +1002,8 @@ func (p *Player) msgPLI_RC_PLAYERCOMMENTSSET(packet []byte) bool {
 		p.send(NewBufferFromBytes(rcChatPacket("Server: You are not authorized to set player comments.")))
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	accountNameLen := buf.ReadByte()
-	accountName := string(buf.ReadBytes(int(accountNameLen)))
+	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_PLAYERCOMMENTSSET))
+	accountName := readRCEncodedString(buf)
 	if idx := strings.Index(accountName, "/"); idx != -1 {
 		accountName = accountName[:idx]
 	}
@@ -1012,7 +1021,7 @@ func (p *Player) msgPLI_RC_PLAYERCOMMENTSSET(packet []byte) bool {
 		}
 		targetPlayer = tempPlayer
 	}
-	comment := buf.ReadGString()
+	comment := buf.ReadString()
 	targetPlayer.accountComments = comment
 	targetPlayer.SaveAccount()
 	if rcPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYRC); rcPlayer != nil {
@@ -1023,14 +1032,7 @@ func (p *Player) msgPLI_RC_PLAYERCOMMENTSSET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERBANGET(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountName := buf.ReadGString()
-	if idx := strings.Index(accountName, "/"); idx != -1 {
-		accountName = accountName[:idx]
-	}
-	if idx := strings.Index(accountName, "\\"); idx != -1 {
-		accountName = accountName[:idx]
-	}
+	accountName := readRCAccountPayload(packet, PLI_RC_PLAYERBANGET)
 	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
 		p.server.logger.Warning("[Hack] %s attempted PLAYERBANGET (non-RC): %s", p.accountName, accountName)
 		return true
@@ -1048,20 +1050,19 @@ func (p *Player) msgPLI_RC_PLAYERBANGET(packet []byte) bool {
 	}
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERBANGET)
-	buf2.WriteString8(accountName)
+	writeRCEncodedString(buf2, accountName)
 	banned := byte(0)
 	if targetPlayer.isBanned {
 		banned = 1
 	}
-	buf2.WriteByte(banned)
-	buf2.WriteString8(targetPlayer.banReason)
+	buf2.WriteGChar(banned)
+	buf2.Write([]byte(targetPlayer.banReason))
 	p.send(buf2)
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERBANSET(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountNameLen := buf.ReadByte()
-	accountName := string(buf.ReadBytes(int(accountNameLen)))
+	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_PLAYERBANSET))
+	accountName := readRCEncodedString(buf)
 	if idx := strings.Index(accountName, "/"); idx != -1 {
 		accountName = accountName[:idx]
 	}
@@ -1088,8 +1089,8 @@ func (p *Player) msgPLI_RC_PLAYERBANSET(packet []byte) bool {
 		}
 		targetPlayer = tempPlayer
 	}
-	banned := buf.ReadByte() != 0
-	reason := buf.ReadGString()
+	banned := buf.ReadGChar() != 0
+	reason := buf.ReadString()
 	targetPlayer.isBanned = banned
 	targetPlayer.banReason = reason
 	targetPlayer.SaveAccount()
