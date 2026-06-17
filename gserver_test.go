@@ -577,7 +577,7 @@ func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
 	if server.GetWeapon("badweapon") != nil {
 		t.Fatalf("bad weapon was added after compiler error")
 	}
-	want := append([]byte{PLO_RC_CHAT + 32}, []byte("NC Error: parser error occurred near line 1: bad syntax")...)
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Script compiler output for Weapon badweapon:\xa7error: parser error occurred near line 1: bad syntax")...)
 	if !bytes.Contains(nc.outQueue, want) {
 		t.Fatalf("NC compiler error response = % X, want contains % X", nc.outQueue, want)
 	}
@@ -611,7 +611,7 @@ func TestNCWeaponAddReportsCompilerOutputWhenOutputFileMissing(t *testing.T) {
 	if server.GetWeapon("badweapon") != nil {
 		t.Fatalf("bad weapon was added after compiler output failure")
 	}
-	want := append([]byte{PLO_RC_CHAT + 32}, []byte("NC Error: -> [ERROR] malformed input at line 1: silent output failure")...)
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Script compiler output for Weapon badweapon:\xa7error: malformed input at line 1: silent output failure")...)
 	if !bytes.Contains(nc.outQueue, want) {
 		t.Fatalf("NC compiler missing-output response = % X, want contains % X", nc.outQueue, want)
 	}
@@ -642,7 +642,7 @@ func TestNCWeaponAddWarnsWhenClientsideScriptCannotCompileWithoutCompiler(t *tes
 	if server.GetWeapon("test") == nil {
 		t.Fatalf("weapon was not saved when compiler was unavailable")
 	}
-	want := append([]byte{PLO_RC_CHAT + 32}, []byte("NC Warning: gs2compiler is not configured; saved without compile feedback")...)
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Script compiler output for Weapon test:\xa7warning: gs2compiler is not configured; saved without compile feedback")...)
 	if !bytes.Contains(nc.outQueue, want) {
 		t.Fatalf("NC compiler warning response = % X, want contains % X", nc.outQueue, want)
 	}

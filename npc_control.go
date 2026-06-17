@@ -425,11 +425,11 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	weaponCode = strings.ReplaceAll(weaponCode, "\xa7", "\n")
 	compileResult := p.server.compileGS2ForFeedback("weapon", weaponName, weaponCode)
 	if compileResult.errText != "" {
-		p.server.sendToNC("NC Error: " + firstCompilerErrorLine(compileResult.errText))
+		p.server.sendToNC(formatGS2CompilerOutput("Weapon "+weaponName, "error", compileResult.errText))
 		return true
 	}
 	if compileResult.warningText != "" {
-		p.server.sendToNC("NC Warning: " + compileResult.warningText)
+		p.server.sendToNC(formatGS2CompilerOutput("Weapon "+weaponName, "warning", compileResult.warningText))
 	}
 	actionTaken := ""
 	weapon := p.server.GetWeapon(weaponName)
@@ -462,15 +462,47 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	return true
 }
 
-func firstCompilerErrorLine(text string) string {
-	line := strings.TrimSpace(text)
-	if before, _, ok := strings.Cut(line, "\n"); ok {
-		line = strings.TrimSpace(before)
+func formatGS2CompilerOutput(origin, level, text string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Script compiler output for %s:\xa7", origin)
+	wroteLine := false
+	for _, line := range strings.Split(text, "\n") {
+		line = normalizeCompilerOutputLine(line)
+		if line == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "%s: %s\xa7", level, line)
+		wroteLine = true
 	}
-	if line == "" {
-		return "compiler failed"
+	if !wroteLine {
+		fmt.Fprintf(&b, "%s: compiler failed\xa7", level)
 	}
-	return line
+	return strings.TrimRight(b.String(), "\xa7")
+}
+
+func normalizeCompilerOutputLine(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "->")
+	line = strings.TrimSpace(line)
+	for {
+		lower := strings.ToLower(line)
+		switch {
+		case strings.HasPrefix(lower, "[error]"):
+			line = strings.TrimSpace(line[len("[error]"):])
+		case strings.HasPrefix(lower, "error:"):
+			line = strings.TrimSpace(line[len("error:"):])
+		case strings.HasPrefix(lower, "[warning]"):
+			line = strings.TrimSpace(line[len("[warning]"):])
+		case strings.HasPrefix(lower, "warning:"):
+			line = strings.TrimSpace(line[len("warning:"):])
+		case strings.HasPrefix(lower, "[info]"):
+			line = strings.TrimSpace(line[len("[info]"):])
+		case strings.HasPrefix(lower, "info:"):
+			line = strings.TrimSpace(line[len("info:"):])
+		default:
+			return line
+		}
+	}
 }
 func (p *Player) msgPLI_NC_WEAPONDELETE(packet []byte) bool {
 	if p.playerType&PLTYPE_ANYNC == 0 {
