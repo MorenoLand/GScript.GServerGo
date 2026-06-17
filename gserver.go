@@ -1149,6 +1149,7 @@ func (s *Server) sendToNC(message string) {
 		return
 	}
 	s.sendPacketToType(PLTYPE_ANYNC, rcChatPacket(message))
+	s.sendPacketToType(PLTYPE_ANYRC, rcChatPacket(message))
 }
 
 func (s *Server) sendPacketToAll(data []byte, excludeId uint16) {

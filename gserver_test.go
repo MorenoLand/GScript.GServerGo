@@ -480,6 +480,44 @@ func TestNCWeaponGetParsesPayloadAfterPacketID(t *testing.T) {
 	}
 }
 
+func TestNCWeaponAddNotifiesRCChat(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.weapons = map[string]*Weapon{
+		"test": {name: "test", image: "old.png", script: "old();"},
+	}
+	rc := NewPlayer(nil, server)
+	rc.id = 2
+	rc.playerType = PLTYPE_RC2
+	rc.loaded = true
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
+
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.loaded = true
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_NC_WEAPONADD)
+	packet.WriteGChar(byte(len("test")))
+	packet.Write([]byte("test"))
+	packet.WriteGChar(byte(len("bcalarmclock.png")))
+	packet.Write([]byte("bcalarmclock.png"))
+	if !nc.msgPLI_NC_WEAPONADD(packet.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Weapon/GUI-script test updated by moondeath")...)
+	if !bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("RC did not receive NC weapon update message: % X, want % X", rc.outQueue, want)
+	}
+}
+
 func TestNCClassEditUsesRawNameLength(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.classes = map[string]*ScriptClass{
