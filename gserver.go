@@ -2025,15 +2025,17 @@ func (p *Player) sendNCNPCAdd(npc *NPC) {
 }
 
 func (p *Player) sendNCClassList() {
-	buf := NewBuffer()
-	buf.WriteByte(PLO_NC_CLASSADD)
 	p.server.weaponMu.RLock()
+	classNames := make([]string, 0, len(p.server.classes))
 	for className := range p.server.classes {
-		buf.Write([]byte(className))
-		buf.WriteByte('\n')
+		classNames = append(classNames, className)
 	}
 	p.server.weaponMu.RUnlock()
-	if buf.Len() > 1 {
+	sort.Strings(classNames)
+	for _, className := range classNames {
+		buf := NewBuffer()
+		buf.WriteByte(PLO_NC_CLASSADD)
+		buf.Write([]byte(className))
 		p.send(buf)
 	}
 }

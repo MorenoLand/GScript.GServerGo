@@ -621,6 +621,28 @@ func TestNCClassAddParsesPayloadAfterPacketID(t *testing.T) {
 	}
 }
 
+func TestNCClassListPrefixesEachClassPacket(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.classes = map[string]*ScriptClass{
+		"Alpha": {name: "Alpha"},
+		"Beta":  {name: "Beta"},
+	}
+	nc := NewPlayer(nil, server)
+	nc.playerType = PLTYPE_NC
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	nc.sendNCClassList()
+
+	want := []byte{PLO_NC_CLASSADD + 32}
+	want = append(want, []byte("Alpha\n")...)
+	want = append(want, PLO_NC_CLASSADD+32)
+	want = append(want, []byte("Beta\n")...)
+	if !bytes.Equal(nc.outQueue, want) {
+		t.Fatalf("NC class list = % X, want % X", nc.outQueue, want)
+	}
+}
+
 func TestNCNPCAddBroadcastIsFramed(t *testing.T) {
 	server := newLoginTestServer(t)
 	level := &Level{levelName: "onlinestartlocal.nw"}
