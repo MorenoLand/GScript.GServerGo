@@ -484,7 +484,7 @@ Each sub-packet starts with `readGUChar()` for the ID.
 | 161 | PLO_NC_NPCFLAGS | `GINT id, GSTRING flags` | NC: NPC flags |
 | 162 | PLO_NC_CLASSGET | `CHAR name_len, name, GSTRING script` | NC: Class script |
 | 163 | PLO_NC_CLASSADD | `STRING class_name` | NC: Add class/list entry |
-| 167 | PLO_NC_WEAPONLISTGET | repeated `CHAR name_len, name` | NC: Weapon list |
+| 167 | PLO_NC_WEAPONLISTGET | repeated `GByte name_len, name` | NC: Weapon list |
 | 168 | PLO_UNKNOWN168 | (blank) | Login server blank packet |
 | 171 | PLO_BIGMAP | `maptext,mapimage,x,y` | Big map |
 | 172 | PLO_MINIMAP | `maptext,mapimage,x,y` | Mini map |
@@ -498,7 +498,7 @@ Each sub-packet starts with `readGUChar()` for the ID.
 | 188 | PLO_NC_CLASSDELETE | `STRING class` | NC: Class deleted |
 | 190 | PLO_UNKNOWN190 | (blank) | Triggers IRC/text request sequence |
 | 191 | PLO_SHOOT2 | `GUSHORT player_id, shoot_data` | Shoot (new) |
-| 192 | PLO_NC_WEAPONGET | `CHAR name_len, name, CHAR img_len, img, script` | NC: Weapon data |
+| 192 | PLO_NC_WEAPONGET | `GByte name_len, name, GByte img_len, img, script` | NC: Weapon data |
 | 194 | PLO_CLEARWEAPONS | (blank) | Clear weapon list |
 
 ### Packet Behavior Notes
@@ -1151,8 +1151,8 @@ Each class entry is sent as its own packet.
 - `NPCSCRIPTGET` replies with `PLO_NC_NPCSCRIPT`, `GINT id`, and the tokenized script source.
 - `NPCFLAGSGET` replies with `PLO_NC_NPCFLAGS`, `GINT id`, and tokenized `flag=value` lines.
 - `LOCALNPCSGET` replies with `PLO_NC_LEVELDUMP` containing a tokenized level dump plus each local NPC variable dump.
-- `WEAPONLISTGET` replies with one `PLO_NC_WEAPONLISTGET` packet containing repeated raw `CHAR name_len, name` entries for non-default weapons.
-- `WEAPONGET` replies with `PLO_NC_WEAPONGET`, raw `CHAR name_len, name`, raw `CHAR image_len, image`, then script text with newlines replaced by `0xA7`.
+- `WEAPONLISTGET` replies with one `PLO_NC_WEAPONLISTGET` packet containing repeated `GByte name_len, name` entries for non-default weapons.
+- `WEAPONGET` replies with `PLO_NC_WEAPONGET`, `GByte name_len, name`, `GByte image_len, image`, then script text with newlines replaced by `0xA7`.
 - `LEVELLISTGET` replies with `PLO_NC_LEVELLIST` containing `gtokenize()`d level names, one per line.
 - Adding or updating a class calls `updateClassForPlayers()` in the C++ server; supported game clients receive refreshed class bytecode via `PLO_RAWDATA` / `PLO_NPCWEAPONSCRIPT`.
 

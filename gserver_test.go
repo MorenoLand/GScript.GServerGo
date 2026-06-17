@@ -447,7 +447,7 @@ func TestNCNpcFlagsGetSetRoundTrip(t *testing.T) {
 	}
 }
 
-func TestNCWeaponListUsesRawNameLengths(t *testing.T) {
+func TestNCWeaponListUsesGByteNameLengths(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.weapons = map[string]*Weapon{
 		"zweapon":       {name: "ZWeapon", image: "z.png", script: "function onCreated() {}"},
@@ -464,8 +464,8 @@ func TestNCWeaponListUsesRawNameLengths(t *testing.T) {
 
 	want := NewBuffer()
 	want.WriteByte(PLO_NC_WEAPONLISTGET + 32)
-	want.WriteString8("ControlWeapon")
-	want.WriteString8("ZWeapon")
+	want.WriteString8Encoded("ControlWeapon")
+	want.WriteString8Encoded("ZWeapon")
 	want.WriteByte('\n')
 	if !bytes.Equal(nc.outQueue, want.Bytes()) {
 		t.Fatalf("NC weapon list payload = % X, want % X", nc.outQueue, want.Bytes())
@@ -502,7 +502,7 @@ func TestNCWeaponListAfterWeaponAddIsSingleCleanPacket(t *testing.T) {
 
 	want := NewBuffer()
 	want.WriteByte(PLO_NC_WEAPONLISTGET + 32)
-	want.WriteString8("test")
+	want.WriteString8Encoded("test")
 	want.WriteByte('\n')
 	if !bytes.Equal(nc.outQueue, want.Bytes()) {
 		t.Fatalf("weapon list after add = % X, want % X", nc.outQueue, want.Bytes())
@@ -526,8 +526,8 @@ func TestNCWeaponGetParsesPayloadAfterPacketID(t *testing.T) {
 
 	want := NewBuffer()
 	want.WriteByte(PLO_NC_WEAPONGET + 32)
-	want.WriteString8("ControlWeapon")
-	want.WriteString8("control.png")
+	want.WriteString8Encoded("ControlWeapon")
+	want.WriteString8Encoded("control.png")
 	want.Write([]byte("line1\xa7line2"))
 	want.WriteByte('\n')
 	if !bytes.Contains(nc.outQueue, want.Bytes()) {
@@ -2980,7 +2980,7 @@ func TestHandleRawDataDecompressesGen2NCFrames(t *testing.T) {
 
 	want := NewBuffer()
 	want.WriteByte(PLO_NC_WEAPONLISTGET + 32)
-	want.WriteString8("ControlWeapon")
+	want.WriteString8Encoded("ControlWeapon")
 	want.WriteByte('\n')
 	if !bytes.Contains(p.outQueue, want.Bytes()) {
 		t.Fatalf("NC weapon list response = % X, want % X", p.outQueue, want.Bytes())

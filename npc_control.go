@@ -384,7 +384,7 @@ func (p *Player) msgPLI_NC_WEAPONLISTGET(packet []byte) bool {
 		return strings.ToLower(names[i]) < strings.ToLower(names[j])
 	})
 	for _, weaponName := range names {
-		buf.WriteByte(byte(len(weaponName))).Write([]byte(weaponName))
+		buf.WriteString8Encoded(weaponName)
 	}
 	p.server.logger.PacketDebug("NC weapon list for %s: names=%q raw=% X", p.accountName, names, buf.Bytes())
 	p.send(buf)
@@ -402,8 +402,8 @@ func (p *Player) msgPLI_NC_WEAPONGET(packet []byte) bool {
 		script := strings.ReplaceAll(weapon.script, "\n", "\xa7")
 		buf2 := NewBuffer()
 		buf2.WriteByte(PLO_NC_WEAPONGET)
-		buf2.WriteByte(byte(len(weaponName))).Write([]byte(weaponName))
-		buf2.WriteByte(byte(len(weapon.image))).Write([]byte(weapon.image))
+		buf2.WriteString8Encoded(weaponName)
+		buf2.WriteString8Encoded(weapon.image)
 		buf2.Write([]byte(script))
 		p.send(buf2)
 	} else {
