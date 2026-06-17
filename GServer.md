@@ -483,8 +483,8 @@ Each sub-packet starts with `readGUChar()` for the ID.
 | 160 | PLO_NC_NPCSCRIPT | `GINT id, GSTRING script` | NC: NPC script |
 | 161 | PLO_NC_NPCFLAGS | `GINT id, GSTRING flags` | NC: NPC flags |
 | 162 | PLO_NC_CLASSGET | `CHAR name_len, name, GSTRING script` | NC: Class script |
-| 163 | PLO_NC_CLASSADD | `STRING class_name` | NC: Add class |
-| 167 | PLO_NC_WEAPONLISTGET | `name1, name2, ...` | NC: Weapon list |
+| 163 | PLO_NC_CLASSADD | `STRING class_name` | NC: Add class/list entry |
+| 167 | PLO_NC_WEAPONLISTGET | repeated `CHAR name_len, name` | NC: Weapon list |
 | 168 | PLO_UNKNOWN168 | (blank) | Login server blank packet |
 | 171 | PLO_BIGMAP | `maptext,mapimage,x,y` | Big map |
 | 172 | PLO_MINIMAP | `maptext,mapimage,x,y` | Mini map |
@@ -1121,6 +1121,7 @@ PLO_NC_NPCADD(158) GINT npc_id, NPCPROP_NAME, NPCPROP_TYPE, NPCPROP_CURLEVEL
 ```
 PLO_NC_CLASSADD(163) class_name\n
 ```
+Each class entry is sent as its own packet.
 
 ### NC Packets
 | ID | Name | Format |
@@ -1143,6 +1144,17 @@ PLO_NC_CLASSADD(163) class_name\n
 | 117 | WEAPONADD | `CHAR weapon_len, weapon, CHAR img_len, img, code` |
 | 118 | WEAPONDELETE | `STRING weapon_name` |
 | 119 | CLASSDELETE | `STRING class_name` |
+
+### NC Response Details
+
+- `NPCGET` replies with `PLO_NC_NPCATTRIBUTES` containing `TNPC::getVariableDump().gtokenize()`.
+- `NPCSCRIPTGET` replies with `PLO_NC_NPCSCRIPT`, `GINT id`, and the tokenized script source.
+- `NPCFLAGSGET` replies with `PLO_NC_NPCFLAGS`, `GINT id`, and tokenized `flag=value` lines.
+- `LOCALNPCSGET` replies with `PLO_NC_LEVELDUMP` containing a tokenized level dump plus each local NPC variable dump.
+- `WEAPONLISTGET` replies with one `PLO_NC_WEAPONLISTGET` packet containing repeated raw `CHAR name_len, name` entries for non-default weapons.
+- `WEAPONGET` replies with `PLO_NC_WEAPONGET`, raw `CHAR name_len, name`, raw `CHAR image_len, image`, then script text with newlines replaced by `0xA7`.
+- `LEVELLISTGET` replies with `PLO_NC_LEVELLIST` containing `gtokenize()`d level names, one per line.
+- Adding or updating a class calls `updateClassForPlayers()` in the C++ server; supported game clients receive refreshed class bytecode via `PLO_RAWDATA` / `PLO_NPCWEAPONSCRIPT`.
 
 ### NPC Server Address Notification
 RCs with NPC-control rights request the NC/NPC-server connection target with `PLI_NPCSERVERQUERY`:
