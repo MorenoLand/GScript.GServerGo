@@ -1966,7 +1966,7 @@ func (p *Player) sendRCPostLoginTail() {
 		p.sendPLO_ADDPLAYER(other)
 	}
 	p.server.playerMu.RUnlock()
-	p.server.sendPacketToType(PLTYPE_ANYRC, rcChatPacket("New RC: "+p.accountName))
+	p.server.sendRCChat("New RC: " + p.accountName)
 }
 
 func (p *Player) sendNCPostLoginTail() {
@@ -1981,7 +1981,7 @@ func (p *Player) sendNCPostLoginTail() {
 		}
 	}
 	p.server.playerMu.RUnlock()
-	p.server.sendPacketToType(PLTYPE_ANYNC, rcChatPacket("New NC: "+p.accountName))
+	p.server.sendToNC("New NC: " + p.accountName)
 }
 
 func (s *Server) configuredName() string {

@@ -868,6 +868,7 @@ func TestRCPostLoginTailAnnouncesNewRCToAllRCs(t *testing.T) {
 	rc.sendRCPostLoginTail()
 
 	want := append([]byte{PLO_RC_CHAT + 32}, []byte("New RC: moondeath")...)
+	want = append(want, '\n')
 	if !bytes.Contains(existing.outQueue, want) {
 		t.Fatalf("existing RC did not receive new RC message: % X", existing.outQueue)
 	}
@@ -900,10 +901,13 @@ func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
 	nc.sendNCPostLoginTail()
 
 	want := append([]byte{PLO_RC_CHAT + 32}, []byte("New NC: moondeath")...)
+	want = append(want, '\n')
 	if !bytes.Contains(existing.outQueue, want) {
 		t.Fatalf("existing NC did not receive new NC message: % X", existing.outQueue)
 	}
-	if !bytes.Contains(nc.outQueue, append([]byte{PLO_RC_CHAT + 32}, []byte("Welcome to the NPC-Server for Orion-Go")...)) {
+	welcome := append([]byte{PLO_RC_CHAT + 32}, []byte("Welcome to the NPC-Server for Orion-Go")...)
+	welcome = append(welcome, '\n')
+	if !bytes.Contains(nc.outQueue, welcome) {
 		t.Fatalf("new NC did not receive welcome message: % X", nc.outQueue)
 	}
 	if !bytes.Contains(nc.outQueue, want) {
