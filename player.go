@@ -26,6 +26,87 @@ func isDefaultClientFile(fileName string) bool {
 	return false
 }
 
+var playerPropsRC = [PROPCOUNT]bool{
+	PLPROP_NICKNAME:    true,
+	PLPROP_MAXPOWER:    true,
+	PLPROP_CURPOWER:    true,
+	PLPROP_RUPEESCOUNT: true,
+	PLPROP_ARROWSCOUNT: true,
+	PLPROP_BOMBSCOUNT:  true,
+	PLPROP_GLOVEPOWER:  true,
+	PLPROP_SWORDPOWER:  true,
+	PLPROP_SHIELDPOWER: true,
+	PLPROP_GANI:        true,
+	PLPROP_HEADGIF:     true,
+	PLPROP_COLORS:      true,
+	PLPROP_X:           true,
+	PLPROP_Y:           true,
+	PLPROP_STATUS:      true,
+	PLPROP_CURLEVEL:    true,
+	PLPROP_APCOUNTER:   true,
+	PLPROP_MAGICPOINTS: true,
+	PLPROP_KILLSCOUNT:  true,
+	PLPROP_DEATHSCOUNT: true,
+	PLPROP_ONLINESECS:  true,
+	PLPROP_IPADDR:      true,
+	PLPROP_ALIGNMENT:   true,
+	PLPROP_ACCOUNTNAME: true,
+	PLPROP_BODYIMG:     true,
+	PLPROP_RATING:      true,
+}
+
+func (p *Player) getPropsRC() []byte {
+	ret := NewBuffer()
+	ret.WriteString8(p.accountName)
+	ret.WriteString8("main")
+
+	props := NewBuffer()
+	for propId, enabled := range playerPropsRC {
+		if !enabled {
+			continue
+		}
+		props.WriteGChar(byte(propId))
+		props.Write(p.getProp(propId))
+	}
+	propData := props.Bytes()
+	if len(propData) > 255 {
+		propData = propData[:255]
+	}
+	ret.WriteByte(byte(len(propData)))
+	ret.Write(propData)
+
+	ret.WriteShort(int16(len(p.flagList)))
+	for flag, value := range p.flagList {
+		flagText := flag
+		if value != "" {
+			flagText += "=" + value
+		}
+		if len(flagText) > 0xDF {
+			flagText = flagText[:0xDF]
+		}
+		ret.WriteString8(flagText)
+	}
+
+	ret.WriteShort(int16(len(p.chestList)))
+	for _, chest := range p.chestList {
+		parts := strings.SplitN(chest, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		chestData := NewBuffer()
+		chestData.WriteByte(byte(atoi(parts[0])))
+		chestData.WriteByte(byte(atoi(parts[1])))
+		chestData.Write([]byte(parts[2]))
+		ret.WriteString8(string(chestData.Bytes()))
+	}
+
+	ret.WriteByte(byte(len(p.weaponList)))
+	for _, weapon := range p.weaponList {
+		ret.WriteString8(weapon)
+	}
+	return ret.Bytes()
+}
+
 func (p *Player) setPropsFromRC(buf *Buffer, rc *Player) {
 	_ = buf.ReadGCharString()
 	propLen := int(buf.ReadGChar())

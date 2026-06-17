@@ -528,8 +528,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSGET2(packet []byte) bool {
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERPROPSGET)
 	buf2.WriteShort(int16(targetPlayer.id))
-	buf2.WriteString8(targetPlayer.accountName)
-	buf2.WriteString8("main")
+	buf2.Write(targetPlayer.getPropsRC())
 	p.send(buf2)
 	return true
 }
@@ -557,8 +556,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSGET3(packet []byte) bool {
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERPROPSGET)
 	buf2.WriteShort(int16(targetPlayer.id))
-	buf2.WriteString8(targetPlayer.accountName)
-	buf2.WriteString8("main")
+	buf2.Write(targetPlayer.getPropsRC())
 	p.send(buf2)
 	return true
 }
@@ -1164,10 +1162,42 @@ func (p *Player) sendRCFileBrowserDir(folderMap map[string]string) {
 		p.server.logger.Error("Failed to list files in %s: %v", p.lastFolder, err)
 		return
 	}
+	dirs, _ := p.server.config.ListDirs(p.lastFolder)
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RC_FILEBROWSER_DIR)
 	buf.WriteByte(byte(len(p.lastFolder)))
 	buf.Write([]byte(p.lastFolder))
+	for _, dir := range dirs {
+		if strings.HasPrefix(dir, ".") {
+			continue
+		}
+		dirName := dir + "/"
+		childFolder := p.lastFolder + dirName
+		childRights := folderMap[childFolder]
+		if childRights == "" {
+			continue
+		}
+		rights := "r"
+		if first, _, ok := strings.Cut(childRights, ":"); ok && first != "" {
+			rights = first
+		}
+		filePath := childFolder
+		fileInfo, err := p.server.config.FileInfo(filePath)
+		if err != nil {
+			continue
+		}
+		entry := NewBuffer()
+		entry.WriteByte(byte(len(dirName)))
+		entry.Write([]byte(dirName))
+		entry.WriteByte(byte(len(rights)))
+		entry.Write([]byte(rights))
+		entry.WriteGInt5(0)
+		entry.WriteGInt5(uint64(fileInfo.ModTime().Unix()))
+		entryData := entry.Bytes()
+		buf.WriteByte(' ')
+		buf.WriteByte(byte(len(entryData)))
+		buf.Write(entryData)
+	}
 	wildcards := strings.Split(folderMap[p.lastFolder], "\n")
 	for _, wildcardEntry := range wildcards {
 		if wildcardEntry == "" {

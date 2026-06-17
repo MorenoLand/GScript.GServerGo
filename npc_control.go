@@ -434,7 +434,7 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	actionTaken := ""
 	weapon := p.server.GetWeapon(weaponName)
 	if weapon != nil {
-		if weapon.defPlayer || weapon.bytecodeFile != "" {
+		if weapon.defPlayer {
 			return true
 		}
 		weapon.image = weaponImage

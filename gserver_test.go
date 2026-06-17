@@ -826,6 +826,45 @@ func TestNCWeaponAddNotifiesNCChatOnly(t *testing.T) {
 	}
 }
 
+func TestNCWeaponAddUpdatesExistingWeaponWithBytecodeFile(t *testing.T) {
+	server := newLoginTestServer(t)
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.loaded = true
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+	existing := NewWeapon("test")
+	existing.image = "old.png"
+	existing.script = "old();"
+	existing.bytecodeFile = "weapon_bytecode/weapontest.gs2bc"
+	server.AddWeapon(existing)
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_NC_WEAPONADD)
+	packet.WriteGChar(byte(len("test")))
+	packet.Write([]byte("test"))
+	packet.WriteGChar(byte(len("bcalarmclock.png")))
+	packet.Write([]byte("bcalarmclock.png"))
+	packet.Write([]byte("echo(1);"))
+
+	if !nc.msgPLI_NC_WEAPONADD(packet.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+
+	weapon := server.GetWeapon("test")
+	if weapon == nil || weapon.image != "bcalarmclock.png" || weapon.script != "echo(1);" {
+		t.Fatalf("weapon was not updated: %#v", weapon)
+	}
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Weapon/GUI-script test updated by moondeath")...)
+	want = append(want, '\n')
+	if !bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("NC update chat missing: % X, want % X", nc.outQueue, want)
+	}
+}
+
 func TestSendPacketToTypeDoesNotHoldPlayerLockWhileSending(t *testing.T) {
 	server := newLoginTestServer(t)
 	rc := NewPlayer(nil, server)
@@ -1566,6 +1605,60 @@ func TestRCPlayerPropsGet2NetworkPayloadStripsPacketID(t *testing.T) {
 	}
 }
 
+func TestRCPlayerPropsGet2SendsLoadedAccountProps(t *testing.T) {
+	server := newLoginTestServer(t)
+	target := NewPlayer(nil, server)
+	target.id = 3
+	target.playerType = PLTYPE_CLIENT3
+	target.accountName = "moondeath"
+	target.character.nickName = "moondeath"
+	target.character.bodyImage = "body.png"
+	target.levelName = "onlinestartlocal.nw"
+	target.kills = 12
+	target.deaths = 4
+	target.onlineTime = 99
+	target.accountIp = 0xC0A80119
+	target.weaponList = []string{"Spin Attack"}
+	target.SetFlag("clientr.foo", "bar")
+	target.chestList = []string{"10:20:onlinestartlocal.nw"}
+	server.players[target.id] = target
+
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_VIEWATTRIBUTES
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	packet := append([]byte{PLI_RC_PLAYERPROPSGET2}, NewBuffer().WriteGShort(target.id).Bytes()...)
+	if !rc.msgPLI_RC_PLAYERPROPSGET2(packet) {
+		t.Fatal("msgPLI_RC_PLAYERPROPSGET2 returned false")
+	}
+
+	payload := bytes.TrimSuffix(rc.outQueue, []byte{'\n'})
+	if len(payload) == 0 || payload[0] != PLO_RC_PLAYERPROPSGET+32 {
+		t.Fatalf("player props packet = % X", rc.outQueue)
+	}
+	buf := NewBufferFromBytes(payload[1:])
+	if got := buf.ReadShort(); got != int16(target.id) {
+		t.Fatalf("player id = %d, want %d", got, target.id)
+	}
+	if got := string(buf.ReadBytes(int(buf.ReadByte()))); got != "moondeath" {
+		t.Fatalf("account = %q, want moondeath", got)
+	}
+	if got := string(buf.ReadBytes(int(buf.ReadByte()))); got != "main" {
+		t.Fatalf("world = %q, want main", got)
+	}
+	propsLen := int(buf.ReadByte())
+	props := buf.ReadBytes(propsLen)
+	killsProp := append([]byte{PLPROP_KILLSCOUNT + 32}, NewBuffer().WriteGInt(12).Bytes()...)
+	accountProp := append([]byte{PLPROP_ACCOUNTNAME + 32}, NewBuffer().WriteString8Encoded("moondeath").Bytes()...)
+	bodyProp := append([]byte{PLPROP_BODYIMG + 32}, NewBuffer().WriteString8Encoded("body.png").Bytes()...)
+	if !bytes.Contains(props, killsProp) || !bytes.Contains(props, accountProp) || !bytes.Contains(props, bodyProp) {
+		t.Fatalf("props missing expected account data: props=% X kills=% X account=% X body=% X", props, killsProp, accountProp, bodyProp)
+	}
+}
+
 func TestRCPlayerRightsGetNetworkPayloadUsesRawAccountAndGInt5Rights(t *testing.T) {
 	server := newLoginTestServer(t)
 	rc := NewPlayer(nil, server)
@@ -1919,6 +2012,25 @@ func TestRCFileBrowserStartSendsTokenizedFoldersAndDirectory(t *testing.T) {
 	}
 	if len(entry) != rightsOffset+1+len("rw")+10 {
 		t.Fatalf("dir entry should contain two GInt5 values, got %d bytes: % X", len(entry), entry)
+	}
+}
+
+func TestRCFileBrowserRootListsFilesAndFolders(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "world/onlinestartlocal.nw", "level")
+	writeTestFile(t, server.config.GetBasePath(), "world/readme.txt", "readme")
+	writeTestFile(t, server.config.GetBasePath(), "world/levels/test.nw", "level")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw *.nw", "rw *.txt", "rw levels/*.nw"}
+	rc.lastFolder = ""
+
+	rc.msgPLI_RC_FILEBROWSER_START([]byte{PLI_RC_FILEBROWSER_START})
+
+	if !bytes.Contains(rc.outQueue, []byte("onlinestartlocal.nw")) {
+		t.Fatalf("root file browser output missing root level: % X", rc.outQueue)
+	}
+	if !bytes.Contains(rc.outQueue, []byte("levels/")) {
+		t.Fatalf("root file browser output missing child folder: % X", rc.outQueue)
 	}
 }
 
