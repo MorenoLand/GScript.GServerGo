@@ -434,6 +434,102 @@ func TestRCPostLoginTailIncludesNPCServerWithoutSocket(t *testing.T) {
 	}
 }
 
+func TestRCPlayerPropsSetUpdatesTargetFromLegacyPacket(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETATTRIBUTES
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	target := NewPlayer(nil, server)
+	target.id = 7
+	target.accountName = "Player"
+	target.character.nickName = "OldNick"
+	target.flagList = map[string]string{"oldflag": "1"}
+	target.weaponList = []string{"oldweapon"}
+	target.chestList = []string{"1:1:old.nw"}
+	target.queueOutgoing = true
+	target.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[target.id] = target
+
+	props := NewBuffer()
+	props.WriteGChar(PLPROP_NICKNAME)
+	props.WriteGChar(byte(len("NewNick")))
+	props.Write([]byte("NewNick"))
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_RC_PLAYERPROPSSET)
+	packet.WriteGShort(target.id)
+	packet.WriteGChar(byte(len("main")))
+	packet.Write([]byte("main"))
+	packet.WriteGChar(byte(props.Len()))
+	packet.Write(props.Bytes())
+	packet.WriteGShort(1)
+	packet.WriteGChar(byte(len("newflag=ok")))
+	packet.Write([]byte("newflag=ok"))
+	packet.WriteGShort(1)
+	packet.WriteGChar(byte(2 + len("newlevel.nw")))
+	packet.WriteGChar(4)
+	packet.WriteGChar(5)
+	packet.Write([]byte("newlevel.nw"))
+	packet.WriteGChar(1)
+	packet.WriteGChar(byte(len("spinattack")))
+	packet.Write([]byte("spinattack"))
+
+	if !rc.msgPLI_RC_PLAYERPROPSSET(packet.Bytes()) {
+		t.Fatalf("msgPLI_RC_PLAYERPROPSSET returned false")
+	}
+	if target.character.nickName != "NewNick" {
+		t.Fatalf("target nick = %q, want NewNick", target.character.nickName)
+	}
+	if got := target.flagList["newflag"]; got != "ok" {
+		t.Fatalf("target flag newflag = %q, want ok; flags=%#v", got, target.flagList)
+	}
+	if _, ok := target.flagList["oldflag"]; ok {
+		t.Fatalf("old flags were not cleared: %#v", target.flagList)
+	}
+	if len(target.chestList) != 1 || target.chestList[0] != "4:5:newlevel.nw" {
+		t.Fatalf("target chests = %#v, want 4:5:newlevel.nw", target.chestList)
+	}
+	if len(target.weaponList) != 1 || target.weaponList[0] != "spinattack" {
+		t.Fatalf("target weapons = %#v, want spinattack", target.weaponList)
+	}
+}
+
+func TestRCUpdateLevelsReloadsCachedLevel(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_UPDATELEVEL
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	levelName := "levels/reloadme.nw"
+	writeTestFile(t, server.config.GetBasePath(), levelName, "GLEVNW01\n")
+	level := NewLevel()
+	if !level.loadLevel(server, levelName) {
+		t.Fatalf("initial loadLevel failed")
+	}
+	server.AddLevel(level)
+
+	writeTestFile(t, server.config.GetBasePath(), levelName, "GLEVNW02\n")
+	packet := NewBuffer()
+	packet.WriteByte(PLI_RC_UPDATELEVELS)
+	packet.WriteGShort(1)
+	packet.WriteGChar(byte(len(levelName)))
+	packet.Write([]byte(levelName))
+
+	if !rc.msgPLI_RC_UPDATELEVELS(packet.Bytes()) {
+		t.Fatalf("msgPLI_RC_UPDATELEVELS returned false")
+	}
+	if level.fileVersion != "GLEVNW02" {
+		t.Fatalf("level fileVersion = %q, want GLEVNW02", level.fileVersion)
+	}
+}
+
 func TestRCPostLoginTailAnnouncesNewRCToOtherRCs(t *testing.T) {
 	server := newLoginTestServer(t)
 	existing := NewPlayer(nil, server)
@@ -4699,6 +4795,46 @@ func TestUpdateFileRequestSendsFileWhenModTimeDiffers(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("update file response = % X, want % X", got, want)
+	}
+}
+
+func TestUpdateFileDefaultClientAssetReturnsUpToDate(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	fileName := "walk.gani"
+	p := &Player{
+		conn:       serverConn,
+		server:     &Server{logger: NewLogger("", false), config: NewFileSystem(t.TempDir())},
+		encryption: *NewEncryption(),
+		versionId:  222,
+	}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+
+	request := NewBuffer()
+	request.WriteByte(PLI_UPDATEFILE)
+	request.WriteGInt5(0)
+	request.Write([]byte(fileName))
+
+	want := append([]byte{PLO_FILEUPTODATE + 32}, []byte(fileName)...)
+	want = append(want, '\n')
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.msgPLI_UPDATEFILE(request.Bytes())
+		done <- struct{}{}
+	}()
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read default asset update response: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("default asset update response = % X, want % X", got, want)
 	}
 }
 

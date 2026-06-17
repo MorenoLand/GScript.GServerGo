@@ -1,0 +1,111 @@
+package main
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
+
+var defaultClientFilePatterns = []string{
+	"carried.gani", "carry.gani", "carrystill.gani", "carrypeople.gani", "dead.gani", "def.gani", "ghostani.gani", "grab.gani", "gralats.gani", "hatoff.gani", "haton.gani", "hidden.gani", "hiddenstill.gani", "hurt.gani", "idle.gani", "kick.gani", "lava.gani", "lift.gani", "maps1.gani", "maps2.gani", "maps3.gani", "pull.gani", "push.gani", "ride.gani", "rideeat.gani", "ridefire.gani", "ridehurt.gani", "ridejump.gani", "ridestill.gani", "ridesword.gani", "shoot.gani", "sit.gani", "skip.gani", "sleep.gani", "spin.gani", "swim.gani", "sword.gani", "walk.gani", "walkslow.gani",
+	"sword?.png", "sword?.gif",
+	"shield?.png", "shield?.gif",
+	"body.png", "body2.png", "body3.png",
+	"arrow.wav", "arrowon.wav", "axe.wav", "bomb.wav", "chest.wav", "compudead.wav", "crush.wav", "dead.wav", "extra.wav", "fire.wav", "frog.wav", "frog2.wav", "goal.wav", "horse.wav", "horse2.wav", "item.wav", "item2.wav", "jump.wav", "lift.wav", "lift2.wav", "nextpage.wav", "put.wav", "sign.wav", "steps.wav", "steps2.wav", "stonemove.wav", "sword.wav", "swordon.wav", "thunder.wav", "water.wav",
+	"pics1.png",
+}
+
+func isDefaultClientFile(fileName string) bool {
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(fileName)))
+	for _, pattern := range defaultClientFilePatterns {
+		matched, err := filepath.Match(pattern, base)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Player) setPropsFromRC(buf *Buffer, rc *Player) {
+	_ = buf.ReadGCharString()
+	propLen := int(buf.ReadGChar())
+	props := buf.ReadBytes(propLen)
+	if len(props) > 0 {
+		p.msgPLI_PLAYERPROPS(append([]byte{PLI_PLAYERPROPS}, props...))
+	}
+
+	for flag, value := range p.flagList {
+		if p.id != 0 {
+			del := NewBuffer()
+			del.WriteByte(PLO_FLAGDEL).Write([]byte(flag))
+			if value != "" {
+				del.WriteByte('=').Write([]byte(value))
+			}
+			p.send(del)
+		}
+	}
+	p.flagList = make(map[string]string)
+	flagCount := int(buf.ReadGShort())
+	for i := 0; i < flagCount; i++ {
+		flag := buf.ReadGCharString()
+		name, value, _ := strings.Cut(flag, "=")
+		p.SetFlag(name, value)
+	}
+
+	p.chestList = p.chestList[:0]
+	chestCount := int(buf.ReadGShort())
+	for i := 0; i < chestCount; i++ {
+		chestLen := int(buf.ReadGChar())
+		if chestLen < 2 {
+			_ = buf.ReadBytes(chestLen)
+			continue
+		}
+		x := int(buf.ReadGChar())
+		y := int(buf.ReadGChar())
+		levelName := string(buf.ReadBytes(chestLen - 2))
+		p.chestList = append(p.chestList, fmt.Sprintf("%d:%d:%s", x, y, levelName))
+	}
+
+	hadBomb := false
+	hadBow := false
+	for _, weaponName := range p.weaponList {
+		if p.id != 0 {
+			p.sendPLO_NPCWEAPONDEL(weaponName)
+			switch strings.ToLower(weaponName) {
+			case "bomb":
+				p.sendPLO_NPCWEAPONDEL("Bomb")
+				hadBomb = true
+			case "bow":
+				p.sendPLO_NPCWEAPONDEL("Bow")
+				hadBow = true
+			}
+		}
+	}
+	p.weaponList = p.weaponList[:0]
+	weaponCount := int(buf.ReadGChar())
+	for i := 0; i < weaponCount; i++ {
+		weaponLen := int(buf.ReadGChar())
+		if weaponLen == 0 {
+			continue
+		}
+		weaponName := string(buf.ReadBytes(weaponLen))
+		switch strings.ToLower(weaponName) {
+		case "bomb":
+			hadBomb = true
+		case "bow":
+			hadBow = true
+		}
+		p.addWeapon(weaponName)
+	}
+	if p.id != 0 {
+		if !hadBomb {
+			p.sendPLO_NPCWEAPONDEL("Bomb")
+		}
+		if !hadBow {
+			p.sendPLO_NPCWEAPONDEL("Bow")
+		}
+		if rc != nil {
+			p.sendPlayerWarp(p.x, p.y, p.z, p.levelName)
+		}
+	}
+}
