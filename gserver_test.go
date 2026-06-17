@@ -579,6 +579,37 @@ func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
 	}
 }
 
+func TestNCWeaponAddWarnsWhenClientsideScriptCannotCompileWithoutCompiler(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.weapons = map[string]*Weapon{}
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	add := NewBuffer()
+	add.WriteByte(PLI_NC_WEAPONADD)
+	add.WriteGChar(byte(len("test")))
+	add.Write([]byte("test"))
+	add.WriteGChar(byte(len("bcalarmclock.png")))
+	add.Write([]byte("bcalarmclock.png"))
+	add.Write([]byte("//#CLIENTSIDE\xa7bad syntax"))
+
+	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+	if server.GetWeapon("test") == nil {
+		t.Fatalf("weapon was not saved when compiler was unavailable")
+	}
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("NC Warning: gs2compiler is not configured; saved without compile feedback")...)
+	if !bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("NC compiler warning response = % X, want contains % X", nc.outQueue, want)
+	}
+}
+
 func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
@@ -610,6 +641,60 @@ func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
 	}
 	if string(weapon.bytecode) != "bytecode:weapon:test" {
 		t.Fatalf("compiled bytecode = %q", weapon.bytecode)
+	}
+}
+
+func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
+	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
+	server := newLoginTestServer(t)
+	server.settings.Set("gs2compiler", os.Args[0])
+	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
+	server.weapons = map[string]*Weapon{}
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	add := NewBuffer()
+	add.WriteByte(PLI_NC_WEAPONADD)
+	add.WriteGChar(byte(len("test")))
+	add.Write([]byte("test"))
+	add.WriteGChar(byte(len("bcalarmclock.png")))
+	add.Write([]byte("bcalarmclock.png"))
+	add.Write([]byte("//#CLIENTSIDE\xa7function onCreated() {\xa7  player.chat = \"hi\";\xa7}"))
+
+	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+	weaponFile, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "weapons", "weapontest.txt"))
+	if err != nil {
+		t.Fatalf("read saved weapon file: %v", err)
+	}
+	if !bytes.Contains(weaponFile, []byte("BYTECODE weapontest.gs2bc")) {
+		t.Fatalf("weapon file missing BYTECODE line:\n%s", weaponFile)
+	}
+	bytecode, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "weapon_bytecode", "weapontest.gs2bc"))
+	if err != nil {
+		t.Fatalf("read saved bytecode file: %v", err)
+	}
+	if string(bytecode) != "bytecode:weapon:test" {
+		t.Fatalf("saved bytecode = %q", bytecode)
+	}
+
+	reloaded := NewServer("Reloaded")
+	reloaded.config = server.config
+	reloaded.settings = NewSettings()
+	reloaded.logger = NewLogger("", false)
+	reloaded.loadWeapons(false)
+	loadedWeapon := reloaded.GetWeapon("test")
+	if loadedWeapon == nil {
+		t.Fatal("reloaded weapon not found")
+	}
+	if string(loadedWeapon.bytecode) != "bytecode:weapon:test" {
+		t.Fatalf("reloaded bytecode = %q", loadedWeapon.bytecode)
 	}
 }
 
@@ -1381,6 +1466,26 @@ func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
 	}
 }
 
+func TestRCPostLoginTailSendsStaffGuildDefinitions(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.settings.Set("staffguilds", "Server,Manager,Owner")
+	rc := NewPlayer(nil, server)
+	rc.id = 2
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.loaded = true
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
+
+	rc.sendRCPostLoginTail()
+
+	want := append([]byte{PLO_STAFFGUILDS + 32}, []byte("\"Server\",\"Manager\",\"Owner\"")...)
+	if !bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("RC post-login tail missing staffguilds: % X, want % X", rc.outQueue, want)
+	}
+}
+
 func TestRCAdminMessageUsesRawPayload(t *testing.T) {
 	server := newLoginTestServer(t)
 	rc := NewPlayer(nil, server)
@@ -1393,6 +1498,101 @@ func TestRCAdminMessageUsesRawPayload(t *testing.T) {
 	want = append(want, '\n')
 	if !bytes.Equal(rc.outQueue, want) {
 		t.Fatalf("admin message packet = % X, want % X", rc.outQueue, want)
+	}
+}
+
+func TestRCPlayerPropsGet2NetworkPayloadStripsPacketID(t *testing.T) {
+	server := newLoginTestServer(t)
+	target := NewPlayer(nil, server)
+	target.id = 3
+	target.playerType = PLTYPE_CLIENT3
+	target.accountName = "moondeath"
+	target.levelName = "onlinestartlocal.nw"
+	server.players[target.id] = target
+
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_VIEWATTRIBUTES
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	packet := append([]byte{PLI_RC_PLAYERPROPSGET2}, NewBuffer().WriteGShort(target.id).Bytes()...)
+	if !rc.msgPLI_RC_PLAYERPROPSGET2(packet) {
+		t.Fatal("msgPLI_RC_PLAYERPROPSGET2 returned false")
+	}
+
+	want := append([]byte{PLO_RC_PLAYERPROPSGET + 32}, NewBuffer().WriteShort(int16(target.id)).Bytes()...)
+	if !bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("player props response = % X, want prefix % X", rc.outQueue, want)
+	}
+}
+
+func TestRCPlayerRightsGetNetworkPayloadUsesRawAccountAndGInt5Rights(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	if !rc.msgPLI_RC_PLAYERRIGHTSGET(append([]byte{PLI_RC_PLAYERRIGHTSGET}, []byte("Admin")...)) {
+		t.Fatal("msgPLI_RC_PLAYERRIGHTSGET returned false")
+	}
+
+	want := NewBuffer()
+	want.WriteByte(PLO_RC_PLAYERRIGHTSGET + 32)
+	want.WriteString8("Admin")
+	want.WriteGInt5(1)
+	want.WriteString8("")
+	want.WriteShort(0)
+	want.WriteByte('\n')
+	if !bytes.Contains(rc.outQueue, want.Bytes()) {
+		t.Fatalf("rights response = % X, want % X", rc.outQueue, want.Bytes())
+	}
+}
+
+func TestRCPlayerCommentsGetNetworkPayloadUsesRawComments(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "accounts/Admin.txt", ""+
+		"GRACC001\n"+
+		"NICK Admin\n"+
+		"COMMENTS saved comment\n")
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	if !rc.msgPLI_RC_PLAYERCOMMENTSGET(append([]byte{PLI_RC_PLAYERCOMMENTSGET}, []byte("Admin")...)) {
+		t.Fatal("msgPLI_RC_PLAYERCOMMENTSGET returned false")
+	}
+
+	want := append([]byte{PLO_RC_PLAYERCOMMENTSGET + 32}, byte(len("Admin")))
+	want = append(want, []byte("Admin")...)
+	want = append(want, []byte("saved comment")...)
+	want = append(want, '\n')
+	if !bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("comments response = % X, want % X", rc.outQueue, want)
+	}
+}
+
+func TestSendTextParsesCommaStyleListerCommands(t *testing.T) {
+	server := newLoginTestServer(t)
+	p := NewPlayer(nil, server)
+	p.id = 3
+	p.accountName = "moondeath"
+	p.queueOutgoing = true
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+
+	if !p.msgPLI_SENDTEXT(append([]byte{PLI_SENDTEXT}, []byte("GraalEngine,lister,getbanbyid,1")...)) {
+		t.Fatal("msgPLI_SENDTEXT returned false")
+	}
+
+	want := append([]byte{PLO_SERVERTEXT + 32}, []byte("GraalEngine\x01lister\x01getbanbyid\x011\x01")...)
+	want = append(want, '\n')
+	if !bytes.Contains(p.outQueue, want) {
+		t.Fatalf("sendtext fallback response = % X, want % X", p.outQueue, want)
 	}
 }
 

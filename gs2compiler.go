@@ -11,21 +11,22 @@ import (
 )
 
 type gs2CompileResult struct {
-	bytecode []byte
-	errText  string
+	bytecode    []byte
+	errText     string
+	warningText string
 }
 
 func (s *Server) compileGS2ForFeedback(scriptType, scriptName, script string) gs2CompileResult {
 	if s == nil || s.settings == nil {
 		return gs2CompileResult{}
 	}
-	compilerPath := strings.TrimSpace(s.settings.Get("gs2compiler"))
-	if compilerPath == "" {
-		return gs2CompileResult{}
-	}
 	src, ok := clientsideGS2(script)
 	if !ok {
 		return gs2CompileResult{}
+	}
+	compilerPath := strings.TrimSpace(s.settings.Get("gs2compiler"))
+	if compilerPath == "" {
+		return gs2CompileResult{warningText: "gs2compiler is not configured; saved without compile feedback"}
 	}
 
 	tmpDir, err := os.MkdirTemp("", "gserver-gs2-*")

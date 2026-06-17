@@ -341,6 +341,11 @@ func (s *Server) loadWeapons(print bool) {
 		}
 		if data, err := s.config.LoadFile("weapons/" + file); err == nil {
 			if weapon := parseWeapon(string(data)); weapon != nil {
+				if weapon.bytecodeFile != "" {
+					if bytecode, err := s.config.LoadFile("weapon_bytecode/" + weapon.bytecodeFile); err == nil {
+						weapon.bytecode = bytecode
+					}
+				}
 				s.weapons[strings.ToLower(weapon.name)] = weapon
 				if print {
 					s.log("       " + weapon.name + "\n")
@@ -352,7 +357,7 @@ func (s *Server) loadWeapons(print bool) {
 
 func parseWeapon(data string) *Weapon {
 	lines := strings.Split(data, "\n")
-	if len(lines) == 0 || lines[0] != "GRAWP001" {
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "GRAWP001" {
 		return nil
 	}
 	weapon := &Weapon{}
@@ -642,9 +647,19 @@ func sanitizeWeaponFileName(name string) string {
 	return replacer.Replace(name)
 }
 
+func weaponBytecodeFileName(weaponName string) string {
+	return "weapon" + sanitizeWeaponFileName(weaponName) + ".gs2bc"
+}
+
 func (s *Server) saveWeaponFile(weapon *Weapon) error {
-	if s == nil || s.config == nil || weapon == nil || weapon.name == "" || weapon.defPlayer || weapon.bytecodeFile != "" {
+	if s == nil || s.config == nil || weapon == nil || weapon.name == "" || weapon.defPlayer {
 		return nil
+	}
+	if len(weapon.bytecode) > 0 {
+		weapon.bytecodeFile = weaponBytecodeFileName(weapon.name)
+		if err := s.config.SaveFile("weapon_bytecode/"+weapon.bytecodeFile, weapon.bytecode); err != nil {
+			return err
+		}
 	}
 	var out strings.Builder
 	out.WriteString("GRAWP001\r\n")
@@ -654,6 +669,11 @@ func (s *Server) saveWeaponFile(weapon *Weapon) error {
 	out.WriteString("IMAGE ")
 	out.WriteString(weapon.image)
 	out.WriteString("\r\n")
+	if weapon.bytecodeFile != "" {
+		out.WriteString("BYTECODE ")
+		out.WriteString(weapon.bytecodeFile)
+		out.WriteString("\r\n")
+	}
 	if weapon.script != "" {
 		out.WriteString("SCRIPT\r\n")
 		script := strings.ReplaceAll(weapon.script, "\r\n", "\n")
@@ -945,6 +965,9 @@ func (s *Server) getPlayerByAccount(accountName string, playerType int) *Player 
 	return nil
 }
 func (s *Server) accountExists(accountName string) bool {
+	if s != nil && s.config != nil {
+		return s.config.FileExists("accounts/" + accountName + ".txt")
+	}
 	accountPath := "accounts/" + accountName + ".txt"
 	if _, err := os.Stat(accountPath); err == nil {
 		return true
@@ -2062,6 +2085,7 @@ func guntokenizeText(text string) string {
 }
 
 func (p *Player) sendRCPostLoginTail() {
+	p.sendStaffGuilds()
 	p.server.broadcastPlayerListEntryToClients(p)
 	p.server.playerMu.RLock()
 	for _, other := range p.server.players {
@@ -2131,27 +2155,29 @@ func (p *Player) sendNCClassList() {
 	}
 }
 
-func (p *Player) sendPostLoginTail() {
-	p.server.logger.Info("Sending PLO_STAFFGUILDS...")
+func (p *Player) sendStaffGuilds() {
 	staffGuilds := p.server.settings.Get("staffguilds")
-	if staffGuilds != "" {
-		guilds := strings.Split(staffGuilds, ",")
-		buf := NewBuffer()
-		buf.WriteByte(PLO_STAFFGUILDS)
-		for _, guild := range guilds {
-			guild = strings.TrimSpace(guild)
-			if guild != "" {
-				buf.Write([]byte("\"" + guild + "\","))
-			}
-		}
-		if buf.Len() > 1 {
-			packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
-			p.sendPacket(packet.Bytes())
-		} else {
-			p.sendPacket(buf.Bytes())
+	if staffGuilds == "" {
+		return
+	}
+	guilds := strings.Split(staffGuilds, ",")
+	buf := NewBuffer()
+	buf.WriteByte(PLO_STAFFGUILDS)
+	for _, guild := range guilds {
+		guild = strings.TrimSpace(guild)
+		if guild != "" {
+			buf.Write([]byte("\"" + guild + "\","))
 		}
 	}
-	p.server.logger.Info("Sending PLO_STATUSLIST...")
+	if buf.Len() > 1 {
+		packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
+		p.sendPacket(packet.Bytes())
+	} else {
+		p.sendPacket(buf.Bytes())
+	}
+}
+
+func (p *Player) sendStatusList() {
 	statusList := p.server.settings.Get("playerlisticons")
 	if statusList == "" {
 		statusList = p.server.settings.Get("statuslist")
@@ -2159,23 +2185,31 @@ func (p *Player) sendPostLoginTail() {
 	if statusList == "" {
 		statusList = "Online,Away,DND,Eating,Hiding,No PMs,RPing,Sparring,PKing"
 	}
-	if statusList != "" {
-		statuses := strings.Split(statusList, ",")
-		buf := NewBuffer()
-		buf.WriteByte(PLO_STATUSLIST)
-		for _, status := range statuses {
-			status = strings.TrimSpace(status)
-			if status != "" {
-				buf.Write([]byte(status + ","))
-			}
-		}
-		if buf.Len() > 1 {
-			packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
-			p.sendPacket(packet.Bytes())
-		} else {
-			p.sendPacket(buf.Bytes())
+	if statusList == "" {
+		return
+	}
+	statuses := strings.Split(statusList, ",")
+	buf := NewBuffer()
+	buf.WriteByte(PLO_STATUSLIST)
+	for _, status := range statuses {
+		status = strings.TrimSpace(status)
+		if status != "" {
+			buf.Write([]byte(status + ","))
 		}
 	}
+	if buf.Len() > 1 {
+		packet := NewBufferFromBytes(buf.Bytes()[:len(buf.Bytes())-1])
+		p.sendPacket(packet.Bytes())
+	} else {
+		p.sendPacket(buf.Bytes())
+	}
+}
+
+func (p *Player) sendPostLoginTail() {
+	p.server.logger.Info("Sending PLO_STAFFGUILDS...")
+	p.sendStaffGuilds()
+	p.server.logger.Info("Sending PLO_STATUSLIST...")
+	p.sendStatusList()
 	p.server.logger.Info("Exchanging player props with existing players...")
 	myClientProps := p.sendPropsWithArray(getRCLoginProps)
 	if p.playerType&PLTYPE_ANYCLIENT != 0 {
@@ -5195,20 +5229,28 @@ func (p *Player) msgPLI_SENDTEXT(packet []byte) bool {
 	}
 	rawText := string(packet[1:])
 	data := rawText
-	data = strings.ReplaceAll(data, "\x01", "\n")
-	parts := strings.SplitN(data, "\n", 3)
+	if strings.Contains(data, "\x01") {
+		data = strings.ReplaceAll(data, "\x01", "\n")
+	} else if strings.Contains(data, ",") {
+		data = guntokenizeText(data)
+	}
+	parts := strings.SplitN(data, "\n", 4)
 	if len(parts) < 3 {
 		return true
 	}
 	weapon := parts[0]
 	type_ := parts[1]
+	option := parts[2]
 	if type_ == "lister" {
-		option := parts[2]
-		if option == "verifybuddies" || option == "addbuddy" || option == "deletebuddy" {
-			p.server.sendPlayerTextToListservers(SVO_REQUESTLIST, p.id, rawText)
+		if !p.server.sendPlayerTextToListservers(SVO_REQUESTLIST, p.id, rawText) {
+			fields := []string{weapon, type_, option}
+			if len(parts) == 4 && parts[3] != "" {
+				fields = append(fields, strings.Split(strings.TrimRight(parts[3], "\n"), "\n")...)
+			}
+			p.sendServerTextFields(fields...)
 		}
 	}
-	p.server.logger.Debug("SENDTEXT: weapon=%s, type=%s", weapon, type_)
+	p.server.logger.Debug("SENDTEXT: weapon=%s, type=%s, option=%s", weapon, type_, option)
 	return true
 }
 func (p *Player) sendRawDataPayload(payload []byte) {

@@ -428,6 +428,9 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 		p.server.sendToNC("NC Error: " + firstCompilerErrorLine(compileResult.errText))
 		return true
 	}
+	if compileResult.warningText != "" {
+		p.server.sendToNC("NC Warning: " + compileResult.warningText)
+	}
 	actionTaken := ""
 	weapon := p.server.GetWeapon(weaponName)
 	if weapon != nil {

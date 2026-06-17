@@ -17,6 +17,36 @@ func rcCommandAccountPacket(account string) []byte {
 	return NewBuffer().WriteGString(strings.TrimSpace(account)).Bytes()
 }
 
+func rcPayload(packet []byte, packetId byte) []byte {
+	if len(packet) > 0 && packet[0] == packetId {
+		return packet[1:]
+	}
+	return packet
+}
+
+func readRCAccountPayload(packet []byte, packetId byte) string {
+	payload := rcPayload(packet, packetId)
+	if len(payload) == 0 {
+		return ""
+	}
+	buf := NewBufferFromBytes(payload)
+	if account := buf.ReadGString(); account != "" {
+		return sanitizeRCAccountName(account)
+	}
+	return sanitizeRCAccountName(string(payload))
+}
+
+func sanitizeRCAccountName(accountName string) string {
+	accountName = strings.TrimSpace(accountName)
+	if idx := strings.Index(accountName, "/"); idx != -1 {
+		accountName = accountName[:idx]
+	}
+	if idx := strings.Index(accountName, "\\"); idx != -1 {
+		accountName = accountName[:idx]
+	}
+	return accountName
+}
+
 func isRCOnlyPacket(packetId int) bool {
 	if packetId >= PLI_RC_SERVEROPTIONSGET && packetId <= PLI_RC_FILEBROWSER_RENAME {
 		return packetId != PLI_PROFILEGET && packetId != PLI_PROFILESET
@@ -481,7 +511,7 @@ func (p *Player) msgPLI_RC_ACCOUNTLISTGET(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERPROPSGET2(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
+	buf := NewBufferFromBytes(rcPayload(packet, PLI_RC_PLAYERPROPSGET2))
 	playerId := buf.ReadGShort()
 	targetPlayer := p.server.getPlayerById(uint16(playerId))
 	if targetPlayer == nil {
@@ -504,14 +534,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSGET2(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERPROPSGET3(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountName := buf.ReadGString()
-	if idx := strings.Index(accountName, "/"); idx != -1 {
-		accountName = accountName[:idx]
-	}
-	if idx := strings.Index(accountName, "\\"); idx != -1 {
-		accountName = accountName[:idx]
-	}
+	accountName := readRCAccountPayload(packet, PLI_RC_PLAYERPROPSGET3)
 	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYCLIENT)
 	if targetPlayer == nil {
 		if !p.server.accountExists(accountName) {
@@ -540,14 +563,7 @@ func (p *Player) msgPLI_RC_PLAYERPROPSGET3(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERPROPSRESET(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountName := buf.ReadGString()
-	if idx := strings.Index(accountName, "/"); idx != -1 {
-		accountName = accountName[:idx]
-	}
-	if idx := strings.Index(accountName, "\\"); idx != -1 {
-		accountName = accountName[:idx]
-	}
+	accountName := readRCAccountPayload(packet, PLI_RC_PLAYERPROPSRESET)
 	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
 		p.server.logger.Warning("[Hack] %s attempted PLAYERPROPSRESET (non-RC): %s", p.accountName, accountName)
 		return true
@@ -825,14 +841,7 @@ func (p *Player) msgPLI_RC_WARPPLAYER(packet []byte) bool {
 	return true
 }
 func (p *Player) msgPLI_RC_PLAYERRIGHTSGET(packet []byte) bool {
-	buf := NewBufferFromBytes(packet)
-	accountName := buf.ReadGString()
-	if idx := strings.Index(accountName, "/"); idx != -1 {
-		accountName = accountName[:idx]
-	}
-	if idx := strings.Index(accountName, "\\"); idx != -1 {
-		accountName = accountName[:idx]
-	}
+	accountName := readRCAccountPayload(packet, PLI_RC_PLAYERRIGHTSGET)
 	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
 		p.server.logger.Warning("[Hack] %s attempted PLAYERRIGHTSGET (non-RC): %s", p.accountName, accountName)
 		return true
@@ -857,14 +866,10 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSGET(packet []byte) bool {
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERRIGHTSGET)
 	buf2.WriteString8(accountName)
-	buf2.WriteByte(byte(targetPlayer.adminRights >> 24))
-	buf2.WriteByte(byte(targetPlayer.adminRights >> 16))
-	buf2.WriteByte(byte(targetPlayer.adminRights >> 8))
-	buf2.WriteByte(byte(targetPlayer.adminRights))
-	buf2.WriteByte(byte(targetPlayer.adminRights >> 32))
+	buf2.WriteGInt5(uint64(targetPlayer.adminRights))
 	buf2.WriteString8(targetPlayer.adminIp)
 	buf2.WriteShort(int16(len(folders)))
-	buf2.WriteString8(folders)
+	buf2.Write([]byte(folders))
 	p.send(buf2)
 	return true
 }
@@ -942,14 +947,7 @@ func (p *Player) msgPLI_RC_PLAYERCOMMENTSGET(packet []byte) bool {
 		p.server.logger.Warning("[Hack] %s attempted PLAYERCOMMENTSGET (non-RC)", p.accountName)
 		return true
 	}
-	buf := NewBufferFromBytes(packet)
-	accountName := buf.ReadGString()
-	if idx := strings.Index(accountName, "/"); idx != -1 {
-		accountName = accountName[:idx]
-	}
-	if idx := strings.Index(accountName, "\\"); idx != -1 {
-		accountName = accountName[:idx]
-	}
+	accountName := readRCAccountPayload(packet, PLI_RC_PLAYERCOMMENTSGET)
 	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYCLIENT)
 	if targetPlayer == nil {
 		if !p.server.accountExists(accountName) {
@@ -964,7 +962,7 @@ func (p *Player) msgPLI_RC_PLAYERCOMMENTSGET(packet []byte) bool {
 	buf2 := NewBuffer()
 	buf2.WriteByte(PLO_RC_PLAYERCOMMENTSGET)
 	buf2.WriteString8(accountName)
-	buf2.WriteString8(targetPlayer.accountComments)
+	buf2.Write([]byte(targetPlayer.accountComments))
 	p.send(buf2)
 	return true
 }
