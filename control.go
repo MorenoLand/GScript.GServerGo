@@ -63,7 +63,7 @@ func readRCEncodedStringPayload(payload []byte) string {
 		return ""
 	}
 	nameLen := int(payload[0] - 32)
-	if nameLen > len(payload)-1 {
+	if nameLen != len(payload)-1 {
 		return ""
 	}
 	return string(payload[1 : 1+nameLen])
@@ -879,7 +879,7 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSGET(packet []byte) bool {
 		p.send(NewBufferFromBytes(rcChatPacket("Server: You are not authorized to view that player's rights.")))
 		return true
 	}
-	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYCLIENT)
+	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYPLAYER)
 	if targetPlayer == nil {
 		if !p.server.accountExists(accountName) {
 			return true

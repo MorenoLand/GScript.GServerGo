@@ -1598,6 +1598,13 @@ func TestAddPlayerPacketUsesEncodedAccountLength(t *testing.T) {
 	}
 }
 
+func TestReadRCAccountPayloadKeepsRawNPCServerAccount(t *testing.T) {
+	packet := append([]byte{PLI_RC_PLAYERRIGHTSGET}, []byte("(npcserver)\n")...)
+	if got := readRCAccountPayload(packet, PLI_RC_PLAYERRIGHTSGET); got != "(npcserver)" {
+		t.Fatalf("account payload = %q, want (npcserver)", got)
+	}
+}
+
 func TestRCAdminMessageUsesRawPayload(t *testing.T) {
 	server := newLoginTestServer(t)
 	rc := NewPlayer(nil, server)
@@ -1800,6 +1807,60 @@ func TestRCPlayerRightsGetTokenizesFolderRights(t *testing.T) {
 	wantFolders := []byte("\"rw *.nw\",\"rw levels/*.graal\"")
 	if !bytes.Contains(rc.outQueue, wantFolders) {
 		t.Fatalf("rights response missing tokenized folders: % X, want %q", rc.outQueue, wantFolders)
+	}
+}
+
+func TestRCPlayerRightsGetFindsNPCServer(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.players = map[uint16]*Player{}
+	npc := NewPlayer(nil, server)
+	npc.id = 1
+	npc.playerType = PLTYPE_NPCSERVER
+	npc.accountName = "(npcserver)"
+	npc.adminRights = PLPERM_NPCCONTROL
+	npc.adminIp = "0.0.0.0"
+	npc.folderList = []string{"rw npcs/*.txt"}
+	server.players[npc.id] = npc
+
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETRIGHTS
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	packet := append([]byte{PLI_RC_PLAYERRIGHTSGET}, []byte("(npcserver)\n")...)
+	if !rc.msgPLI_RC_PLAYERRIGHTSGET(packet) {
+		t.Fatal("msgPLI_RC_PLAYERRIGHTSGET returned false")
+	}
+
+	wantPrefix := append([]byte{PLO_RC_PLAYERRIGHTSGET + 32}, byte(len("(npcserver)")+32))
+	wantPrefix = append(wantPrefix, []byte("(npcserver)")...)
+	if !bytes.Contains(rc.outQueue, wantPrefix) {
+		t.Fatalf("npcserver rights response = % X, want prefix % X", rc.outQueue, wantPrefix)
+	}
+	if !bytes.Contains(rc.outQueue, []byte("\"rw npcs/*.txt\"")) {
+		t.Fatalf("npcserver rights response missing folder rights: % X", rc.outQueue)
+	}
+}
+
+func TestGetPlayerByAccountHonorsTypeMask(t *testing.T) {
+	server := &Server{players: make(map[uint16]*Player)}
+	npc := &Player{id: 1, playerType: PLTYPE_NPCSERVER}
+	npc.accountName = "(npcserver)"
+	client := &Player{id: 2, playerType: PLTYPE_CLIENT3}
+	client.accountName = "moondeath"
+	server.players[npc.id] = npc
+	server.players[client.id] = client
+
+	if got := server.getPlayerByAccount("(npcserver)", PLTYPE_ANYPLAYER); got != npc {
+		t.Fatalf("ANYPLAYER npc lookup = %#v, want npc", got)
+	}
+	if got := server.getPlayerByAccount("(npcserver)", PLTYPE_ANYCLIENT); got != nil {
+		t.Fatalf("ANYCLIENT npc lookup = %#v, want nil", got)
+	}
+	if got := server.getPlayerByAccount("moondeath", PLTYPE_ANYCLIENT); got != client {
+		t.Fatalf("ANYCLIENT client lookup = %#v, want client", got)
 	}
 }
 

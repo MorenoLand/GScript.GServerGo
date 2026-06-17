@@ -968,7 +968,7 @@ func (s *Server) getPlayerByAccount(accountName string, playerType int) *Player 
 	s.playerMu.RLock()
 	defer s.playerMu.RUnlock()
 	for _, p := range s.players {
-		if p.accountName == accountName && (playerType == PLTYPE_ANYCLIENT || p.playerType == playerType || p.playerType == PLTYPE_ANYCLIENT) {
+		if p.accountName == accountName && (playerType == 0 || p.playerType == playerType || p.playerType&playerType != 0) {
 			return p
 		}
 	}
