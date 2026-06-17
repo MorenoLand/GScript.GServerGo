@@ -717,6 +717,11 @@ func (s *Server) loadNpcs(print bool) {
 			s.logger.Warning("Could not add database NPC %s (id=%d)", npc.npcName, npc.id)
 			continue
 		}
+		if npc.level != nil && npc.level.levelName != "" {
+			if level := s.GetLevel(npc.level.levelName); level != nil {
+				s.attachNPCToLevel(npc, level)
+			}
+		}
 		if print {
 			s.log("       " + npc.npcName + "\n")
 		}
@@ -1335,15 +1340,8 @@ func (s *Server) warpDatabaseNPC(npc *NPC, level *Level, x, y int16) {
 		delete(oldLevel.npcs, npc.id)
 		oldLevel.mu.Unlock()
 	}
-	level.mu.Lock()
-	if level.npcs == nil {
-		level.npcs = make(map[uint32]*NPC)
-	}
-	level.npcs[npc.id] = npc
-	level.mu.Unlock()
-
+	s.attachNPCToLevel(npc, level)
 	npc.mu.Lock()
-	npc.level = level
 	npc.x = x
 	npc.y = y
 	npc.mu.Unlock()
@@ -1365,6 +1363,21 @@ func (s *Server) warpDatabaseNPC(npc *NPC, level *Level, x, y int16) {
 		buf.WriteGChar(byte(len(level.levelName))).Write([]byte(level.levelName))
 		s.sendBufferToType(PLTYPE_ANYNC, buf)
 	}
+}
+
+func (s *Server) attachNPCToLevel(npc *NPC, level *Level) {
+	if npc == nil || level == nil {
+		return
+	}
+	level.mu.Lock()
+	if level.npcs == nil {
+		level.npcs = make(map[uint32]*NPC)
+	}
+	level.npcs[npc.id] = npc
+	level.mu.Unlock()
+	npc.mu.Lock()
+	npc.level = level
+	npc.mu.Unlock()
 }
 
 func (s *Server) GetServerTime() uint           { return s.serverTime }

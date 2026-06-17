@@ -258,6 +258,9 @@ func TestNPCServerUsesServerStaffGuild(t *testing.T) {
 
 func TestLoadNpcsLoadsControlNPCWithSavedID(t *testing.T) {
 	server := newLoginTestServer(t)
+	level := NewLevel()
+	level.levelName = "onlinestartlocal.nw"
+	server.levels[level.levelName] = level
 	writeTestFile(t, server.config.GetBasePath(), "npcs/npcControl-NPC.txt", ""+
 		"GRNPC001\n"+
 		"NAME Control-NPC\n"+
@@ -283,6 +286,9 @@ func TestLoadNpcsLoadsControlNPCWithSavedID(t *testing.T) {
 	}
 	if !strings.Contains(npc.script, "Script Server Initialized") {
 		t.Fatalf("loaded npc script = %q", npc.script)
+	}
+	if npc.level != level || level.npcs[npc.id] != npc {
+		t.Fatalf("loaded npc was not attached to saved start level")
 	}
 	if server.npcIdGen != 10001 {
 		t.Fatalf("npcIdGen = %d, want 10001", server.npcIdGen)

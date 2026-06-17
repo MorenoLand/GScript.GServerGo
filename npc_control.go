@@ -255,12 +255,7 @@ func (p *Player) msgPLI_NC_NPCADD(packet []byte) bool {
 		p.server.sendToNC(message)
 		return true
 	}
-	level.mu.Lock()
-	if level.npcs == nil {
-		level.npcs = make(map[uint32]*NPC)
-	}
-	level.npcs[newNpc.id] = newNpc
-	level.mu.Unlock()
+	p.server.attachNPCToLevel(newNpc, level)
 	for _, playerId := range level.getPlayers() {
 		p.server.playerMu.RLock()
 		player := p.server.players[playerId]
