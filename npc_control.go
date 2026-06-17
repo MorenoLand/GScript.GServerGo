@@ -247,7 +247,9 @@ func (p *Player) msgPLI_NC_NPCADD(packet []byte) bool {
 	npcY := parts[6]
 	level := p.server.GetLevel(npcLevelName)
 	if level == nil {
-		p.server.logger.Info("Error adding database npc: Level does not exist")
+		message := "Error adding database npc: Level does not exist"
+		p.server.logger.Info(message)
+		p.server.sendToNC(message)
 		return true
 	}
 	x, _ := strconv.ParseFloat(npcX, 32)
@@ -381,7 +383,7 @@ func (p *Player) msgPLI_NC_WEAPONGET(packet []byte) bool {
 	buf := NewBufferFromBytes(packet[1:])
 	weaponName := buf.ReadString()
 	weapon := p.server.GetWeapon(weaponName)
-	if weapon != nil {
+	if weapon != nil && !weapon.defPlayer {
 		script := strings.ReplaceAll(weapon.script, "\n", "\xa7")
 		buf2 := NewBuffer()
 		buf2.WriteByte(PLO_NC_WEAPONGET)
@@ -389,6 +391,8 @@ func (p *Player) msgPLI_NC_WEAPONGET(packet []byte) bool {
 		buf2.WriteByte(byte(len(weapon.image))).Write([]byte(weapon.image))
 		buf2.Write([]byte(script))
 		p.send(buf2)
+	} else {
+		p.server.sendToNC(fmt.Sprintf("%s prob: weapon %s doesn't exist", p.accountName, weaponName))
 	}
 	return true
 }

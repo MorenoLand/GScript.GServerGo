@@ -480,6 +480,28 @@ func TestNCWeaponGetParsesPayloadAfterPacketID(t *testing.T) {
 	}
 }
 
+func TestNCWeaponGetMissingWeaponReportsToNC(t *testing.T) {
+	server := newLoginTestServer(t)
+	nc := NewPlayer(nil, server)
+	nc.id = 9
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	packet := append([]byte{PLI_NC_WEAPONGET}, []byte("MissingWeapon")...)
+	if !nc.msgPLI_NC_WEAPONGET(packet) {
+		t.Fatalf("msgPLI_NC_WEAPONGET returned false")
+	}
+
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("moondeath prob: weapon MissingWeapon doesn't exist")...)
+	want = append(want, '\n')
+	if !bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("NC missing weapon error = % X, want % X", nc.outQueue, want)
+	}
+}
+
 func TestNCWeaponAddNotifiesRCChat(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.weapons = map[string]*Weapon{
@@ -695,6 +717,30 @@ func TestNCNPCAddBroadcastIsFramed(t *testing.T) {
 	frame := nc.outQueue[idx : idx+next]
 	if bytes.Contains(frame, []byte{PLO_RC_CHAT + 32}) {
 		t.Fatalf("NC npc add broadcast merged with following chat packet: % X", frame)
+	}
+}
+
+func TestNCNPCAddMissingLevelReportsToNC(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.levels = map[string]*Level{}
+	nc := NewPlayer(nil, server)
+	nc.id = 9
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	payload := gtokenizeText("Control-NPC\n0\nCONTROL\nmoondeath\nmissing.nw\n30\n30\n")
+	packet := append([]byte{PLI_NC_NPCADD}, []byte(payload)...)
+	if !nc.msgPLI_NC_NPCADD(packet) {
+		t.Fatalf("msgPLI_NC_NPCADD returned false")
+	}
+
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Error adding database npc: Level does not exist")...)
+	want = append(want, '\n')
+	if !bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("NC missing-level error = % X, want % X", nc.outQueue, want)
 	}
 }
 
