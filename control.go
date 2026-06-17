@@ -958,6 +958,9 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSSET(packet []byte) bool {
 		if strings.Contains(folder, ":") || strings.Contains(folder, "..") || strings.Contains(folder, " /*") {
 			continue
 		}
+		if !p.hasRight(PLPERM_SETFOLDERRIGHTS) && !p.canGrantFolderRight(folder) {
+			continue
+		}
 		if folder != "" {
 			validFolders = append(validFolders, folder)
 		}
@@ -968,6 +971,63 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSSET(packet []byte) bool {
 	p.server.sendRCChat(p.accountName + " has set the rights of " + accountName)
 	return true
 }
+
+func (p *Player) canGrantFolderRight(folder string) bool {
+	requestRights, requestPattern, ok := parseRCFolderRight(folder)
+	if !ok {
+		return false
+	}
+	for _, ownedFolder := range p.folderList {
+		ownedRights, ownedPattern, ok := parseRCFolderRight(ownedFolder)
+		if !ok || !folderRightsContain(ownedRights, requestRights) {
+			continue
+		}
+		if folderPatternContains(ownedPattern, requestPattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseRCFolderRight(folder string) (string, string, bool) {
+	folder = strings.TrimSpace(strings.ReplaceAll(folder, "\\", "/"))
+	if folder == "" {
+		return "", "", false
+	}
+	rights := "r"
+	pattern := folder
+	if parts := strings.SplitN(folder, " ", 2); len(parts) == 2 {
+		rights = strings.ToLower(strings.TrimSpace(parts[0]))
+		pattern = strings.TrimSpace(parts[1])
+	}
+	if rights == "" || pattern == "" || strings.Contains(pattern, "..") || strings.Contains(pattern, ":") {
+		return "", "", false
+	}
+	return rights, pattern, true
+}
+
+func folderRightsContain(ownedRights, requestRights string) bool {
+	for _, right := range requestRights {
+		if right != 'r' && right != 'w' {
+			return false
+		}
+		if !strings.ContainsRune(ownedRights, right) {
+			return false
+		}
+	}
+	return true
+}
+
+func folderPatternContains(ownedPattern, requestPattern string) bool {
+	ownedPattern = strings.ToLower(filepath.ToSlash(strings.TrimSpace(ownedPattern)))
+	requestPattern = strings.ToLower(filepath.ToSlash(strings.TrimSpace(requestPattern)))
+	if ownedPattern == requestPattern {
+		return true
+	}
+	matched, err := filepath.Match(ownedPattern, requestPattern)
+	return err == nil && matched
+}
+
 func (p *Player) msgPLI_RC_PLAYERCOMMENTSGET(packet []byte) bool {
 	if p.playerType != PLTYPE_RC && p.playerType != PLTYPE_RC2 && p.playerType != PLTYPE_ANYRC {
 		p.server.logger.Warning("[Hack] %s attempted PLAYERCOMMENTSGET (non-RC)", p.accountName)

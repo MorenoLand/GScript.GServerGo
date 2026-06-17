@@ -1902,6 +1902,115 @@ func TestRCPlayerRightsSetReadsGInt5Rights(t *testing.T) {
 	}
 }
 
+func TestRCPlayerRightsSetRequiresSetRightsForLocalRights(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", ""+
+		"GRACC001\n"+
+		"NICK moondeath\n"+
+		"LOCALRIGHTS 0\n"+
+		"FOLDERRIGHT rw levels/*.nw\n")
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETFOLDERRIGHTS
+	rc.folderList = []string{"rw levels/*.nw"}
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_RC_PLAYERRIGHTSSET)
+	packet.WriteString8Encoded("moondeath")
+	packet.WriteGInt5(uint64(PLPERM_NPCCONTROL | PLPERM_SETRIGHTS))
+	packet.WriteString8Encoded("127.0.0.1")
+	folders := gtokenizeText("rw levels/*.nw")
+	packet.WriteGShort(uint16(len(folders)))
+	packet.Write([]byte(folders))
+	if !rc.msgPLI_RC_PLAYERRIGHTSSET(packet.Bytes()) {
+		t.Fatal("msgPLI_RC_PLAYERRIGHTSSET returned false")
+	}
+
+	target := NewPlayer(nil, server)
+	if !target.LoadAccount("moondeath", false) {
+		t.Fatal("load target account failed")
+	}
+	if target.adminRights != 0 {
+		t.Fatalf("adminRights = %d, want unchanged 0", target.adminRights)
+	}
+	if got := strings.Join(target.folderList, "\n"); got != "rw levels/*.nw" {
+		t.Fatalf("saved folders = %q, want rw levels/*.nw", got)
+	}
+}
+
+func TestRCPlayerRightsSetRequiresFolderRightToGrantUnownedFolders(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", ""+
+		"GRACC001\n"+
+		"NICK moondeath\n"+
+		"LOCALRIGHTS 0\n")
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETRIGHTS
+	rc.folderList = []string{"rw levels/*.nw"}
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_RC_PLAYERRIGHTSSET)
+	packet.WriteString8Encoded("moondeath")
+	packet.WriteGInt5(uint64(PLPERM_SETRIGHTS))
+	packet.WriteString8Encoded("*.*.*.*")
+	folders := gtokenizeText("rw levels/*.nw\nrw npcs/*.txt")
+	packet.WriteGShort(uint16(len(folders)))
+	packet.Write([]byte(folders))
+	if !rc.msgPLI_RC_PLAYERRIGHTSSET(packet.Bytes()) {
+		t.Fatal("msgPLI_RC_PLAYERRIGHTSSET returned false")
+	}
+
+	target := NewPlayer(nil, server)
+	if !target.LoadAccount("moondeath", false) {
+		t.Fatal("load target account failed")
+	}
+	if got := strings.Join(target.folderList, "\n"); got != "rw levels/*.nw" {
+		t.Fatalf("saved folders = %q, want only owned folder rw levels/*.nw", got)
+	}
+}
+
+func TestRCPlayerRightsSetAllowsUnownedFoldersWithSetFolderRights(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", ""+
+		"GRACC001\n"+
+		"NICK moondeath\n"+
+		"LOCALRIGHTS 0\n")
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETRIGHTS | PLPERM_SETFOLDERRIGHTS
+	rc.folderList = []string{"rw levels/*.nw"}
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_RC_PLAYERRIGHTSSET)
+	packet.WriteString8Encoded("moondeath")
+	packet.WriteGInt5(uint64(PLPERM_SETRIGHTS))
+	packet.WriteString8Encoded("*.*.*.*")
+	folders := gtokenizeText("rw levels/*.nw\nrw npcs/*.txt")
+	packet.WriteGShort(uint16(len(folders)))
+	packet.Write([]byte(folders))
+	if !rc.msgPLI_RC_PLAYERRIGHTSSET(packet.Bytes()) {
+		t.Fatal("msgPLI_RC_PLAYERRIGHTSSET returned false")
+	}
+
+	target := NewPlayer(nil, server)
+	if !target.LoadAccount("moondeath", false) {
+		t.Fatal("load target account failed")
+	}
+	if got := strings.Join(target.folderList, "\n"); got != "rw levels/*.nw\nrw npcs/*.txt" {
+		t.Fatalf("saved folders = %q, want granted folder list", got)
+	}
+}
+
 func TestRCPlayerCommentsGetNetworkPayloadUsesRawComments(t *testing.T) {
 	server := newLoginTestServer(t)
 	writeTestFile(t, server.config.GetBasePath(), "accounts/Admin.txt", ""+
