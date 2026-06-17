@@ -363,6 +363,8 @@ BYTECODE name_of_file
 
 The gserver will load weapon_bytecode/name_of_file and use the bytecode contained there-in.
 
+For NC edit-time GS2 feedback, set `gs2compiler` in `config/serveroptions.txt` to an external compiler executable. The server writes the clientside script to a temp file, calls `gs2compiler [gs2compilerargs...] input.gs2 output.gs2bc`, and relays compiler failures back to NC as `NC Error: ...`.
+
 ## Recent Development
 
 ### 2026-06-15

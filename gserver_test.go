@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -50,6 +51,41 @@ func TestLoadSettingsControlsPacketDebugSeparately(t *testing.T) {
 	if !PACKET_DEBUG_MODE {
 		t.Fatalf("PACKET_DEBUG_MODE = false, want true")
 	}
+}
+
+func TestGS2CompilerHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_GS2_HELPER_PROCESS") != "1" {
+		return
+	}
+	args := os.Args
+	sep := -1
+	for i, arg := range args {
+		if arg == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep < 0 || len(args) < sep+3 {
+		fmt.Fprintln(os.Stderr, "missing input/output args")
+		os.Exit(2)
+	}
+	inputPath := args[sep+1]
+	outputPath := args[sep+2]
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if strings.Contains(string(data), "bad syntax") {
+		fmt.Fprintln(os.Stderr, "parser error occurred near line 1: bad syntax")
+		os.Exit(2)
+	}
+	payload := "bytecode:" + os.Getenv("GS2_SCRIPT_TYPE") + ":" + os.Getenv("GS2_SCRIPT_NAME")
+	if err := os.WriteFile(outputPath, []byte(payload), 0600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	os.Exit(0)
 }
 
 func TestNewServerCreatesNPCServerRuntime(t *testing.T) {
@@ -506,6 +542,74 @@ func TestNCWeaponListAfterWeaponAddIsSingleCleanPacket(t *testing.T) {
 	want.WriteByte('\n')
 	if !bytes.Equal(nc.outQueue, want.Bytes()) {
 		t.Fatalf("weapon list after add = % X, want % X", nc.outQueue, want.Bytes())
+	}
+}
+
+func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
+	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
+	server := newLoginTestServer(t)
+	server.settings.Set("gs2compiler", os.Args[0])
+	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
+	server.weapons = map[string]*Weapon{}
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	add := NewBuffer()
+	add.WriteByte(PLI_NC_WEAPONADD)
+	add.WriteGChar(byte(len("badweapon")))
+	add.Write([]byte("badweapon"))
+	add.WriteGChar(byte(len("bcalarmclock.png")))
+	add.Write([]byte("bcalarmclock.png"))
+	add.Write([]byte("//#CLIENTSIDE\xa7bad syntax"))
+
+	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+	if server.GetWeapon("badweapon") != nil {
+		t.Fatalf("bad weapon was added after compiler error")
+	}
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("NC Error: parser error occurred near line 1: bad syntax")...)
+	if !bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("NC compiler error response = % X, want contains % X", nc.outQueue, want)
+	}
+}
+
+func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
+	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
+	server := newLoginTestServer(t)
+	server.settings.Set("gs2compiler", os.Args[0])
+	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
+	server.weapons = map[string]*Weapon{}
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	add := NewBuffer()
+	add.WriteByte(PLI_NC_WEAPONADD)
+	add.WriteGChar(byte(len("test")))
+	add.Write([]byte("test"))
+	add.WriteGChar(byte(len("bcalarmclock.png")))
+	add.Write([]byte("bcalarmclock.png"))
+	add.Write([]byte("//#CLIENTSIDE\xa7function onCreated() {\xa7  player.chat = \"hi\";\xa7}"))
+
+	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+	weapon := server.GetWeapon("test")
+	if weapon == nil {
+		t.Fatalf("weapon was not added")
+	}
+	if string(weapon.bytecode) != "bytecode:weapon:test" {
+		t.Fatalf("compiled bytecode = %q", weapon.bytecode)
 	}
 }
 

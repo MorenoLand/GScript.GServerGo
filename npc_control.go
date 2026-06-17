@@ -423,6 +423,11 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	weaponImage := string(buf.ReadBytes(int(weaponImageLen)))
 	weaponCode := buf.ReadString()
 	weaponCode = strings.ReplaceAll(weaponCode, "\xa7", "\n")
+	compileResult := p.server.compileGS2ForFeedback("weapon", weaponName, weaponCode)
+	if compileResult.errText != "" {
+		p.server.sendToNC("NC Error: " + firstCompilerErrorLine(compileResult.errText))
+		return true
+	}
 	actionTaken := ""
 	weapon := p.server.GetWeapon(weaponName)
 	if weapon != nil {
@@ -431,12 +436,14 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 		}
 		weapon.image = weaponImage
 		weapon.script = weaponCode
+		weapon.bytecode = compileResult.bytecode
 		p.server.updateWeaponForPlayers(weapon)
 		actionTaken = "updated"
 	} else {
 		newWeapon := NewWeapon(weaponName)
 		newWeapon.image = weaponImage
 		newWeapon.script = weaponCode
+		newWeapon.bytecode = compileResult.bytecode
 		p.server.AddWeapon(newWeapon)
 		weapon = newWeapon
 		actionTaken = "added"
@@ -450,6 +457,17 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 		p.server.sendToNC(logMsg)
 	}
 	return true
+}
+
+func firstCompilerErrorLine(text string) string {
+	line := strings.TrimSpace(text)
+	if before, _, ok := strings.Cut(line, "\n"); ok {
+		line = strings.TrimSpace(before)
+	}
+	if line == "" {
+		return "compiler failed"
+	}
+	return line
 }
 func (p *Player) msgPLI_NC_WEAPONDELETE(packet []byte) bool {
 	if p.playerType&PLTYPE_ANYNC == 0 {
