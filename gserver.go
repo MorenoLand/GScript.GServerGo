@@ -1003,7 +1003,7 @@ func (s *Server) initTriggerCommands() {
 		buf := NewBuffer()
 		buf.WriteByte(PLO_PRIVATEMESSAGE)
 		buf.WriteString8("[RC] " + p.Account.accountName + ": " + msg)
-		s.sendPacketToType(PLTYPE_RC, buf.Bytes())
+		s.sendBufferToType(PLTYPE_RC, buf)
 		return true
 	}
 	s.triggerCommands["gr.addguildmember"] = func(p *Player, args []string) bool {
@@ -1132,6 +1132,23 @@ func (s *Server) sendPacketToTypeExcept(playerType int, data []byte, excludeId u
 	s.playerMu.RUnlock()
 	for _, p := range targets {
 		p.sendPacket(data)
+	}
+}
+
+func (s *Server) sendBufferToType(playerType int, buf *Buffer) {
+	if s == nil || buf == nil {
+		return
+	}
+	s.playerMu.RLock()
+	targets := make([]*Player, 0, len(s.players))
+	for _, p := range s.players {
+		if p != nil && p.playerType&playerType != 0 {
+			targets = append(targets, p)
+		}
+	}
+	s.playerMu.RUnlock()
+	for _, p := range targets {
+		p.send(NewBufferFromBytes(buf.Bytes()))
 	}
 }
 
@@ -7481,7 +7498,7 @@ func (up *UpdatePackage) Reload(server *Server) {
 				buf := NewBuffer()
 				buf.WriteByte(PLO_PRIVATEMESSAGE)
 				buf.WriteString8(fmt.Sprintf("[Server]: Unable to find file '%s' in package '%s'", baseFileName, up.packageName))
-				server.sendPacketToType(PLTYPE_RC, buf.Bytes())
+				server.sendBufferToType(PLTYPE_RC, buf)
 				continue
 			}
 			fileLength := uint32(len(updateFileData))

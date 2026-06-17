@@ -615,8 +615,43 @@ func TestNCClassAddParsesPayloadAfterPacketID(t *testing.T) {
 	}
 	want := []byte{PLO_NC_CLASSADD + 32}
 	want = append(want, []byte("ControlClass")...)
+	want = append(want, '\n')
 	if !bytes.Contains(nc.outQueue, want) {
 		t.Fatalf("NC class add broadcast = % X, want % X", nc.outQueue, want)
+	}
+}
+
+func TestNCNPCAddBroadcastIsFramed(t *testing.T) {
+	server := newLoginTestServer(t)
+	level := &Level{levelName: "onlinestartlocal.nw"}
+	server.levels[level.levelName] = level
+	nc := NewPlayer(nil, server)
+	nc.id = 9
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	payload := gtokenizeText("Control-NPC\n0\nCONTROL\nmoondeath\nonlinestartlocal.nw\n30\n30\n")
+	packet := append([]byte{PLI_NC_NPCADD}, []byte(payload)...)
+	if !nc.msgPLI_NC_NPCADD(packet) {
+		t.Fatalf("msgPLI_NC_NPCADD returned false")
+	}
+
+	wantPrefix := NewBuffer()
+	wantPrefix.WriteByte(PLO_NC_NPCADD + 32)
+	idx := bytes.Index(nc.outQueue, wantPrefix.Bytes())
+	if idx < 0 {
+		t.Fatalf("NC npc add broadcast missing: % X", nc.outQueue)
+	}
+	next := bytes.IndexByte(nc.outQueue[idx:], '\n')
+	if next < 0 {
+		t.Fatalf("NC npc add broadcast was not framed: % X", nc.outQueue)
+	}
+	frame := nc.outQueue[idx : idx+next]
+	if bytes.Contains(frame, []byte{PLO_RC_CHAT + 32}) {
+		t.Fatalf("NC npc add broadcast merged with following chat packet: % X", frame)
 	}
 }
 

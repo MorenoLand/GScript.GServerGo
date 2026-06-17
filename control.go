@@ -374,7 +374,7 @@ func (p *Player) msgPLI_RC_SERVERFLAGSSET(packet []byte) bool {
 				buf2.WriteByte('=')
 				buf2.WriteString8(value)
 			}
-			p.server.sendPacketToType(PLTYPE_ANYCLIENT, buf2.Bytes())
+			p.server.sendBufferToType(PLTYPE_ANYCLIENT, buf2)
 		}
 	}
 	for flag := range oldFlags {
@@ -382,7 +382,7 @@ func (p *Player) msgPLI_RC_SERVERFLAGSSET(packet []byte) bool {
 			buf2 := NewBuffer()
 			buf2.WriteByte(PLO_FLAGDEL)
 			buf2.WriteString8(flag)
-			p.server.sendPacketToType(PLTYPE_ANYCLIENT, buf2.Bytes())
+			p.server.sendBufferToType(PLTYPE_ANYCLIENT, buf2)
 		}
 	}
 	p.server.saveFlags()
@@ -1566,7 +1566,7 @@ func (p *Player) msgPLI_NC_NPCDELETE(packet []byte) bool {
 		buf2 := NewBuffer()
 		buf2.WriteByte(PLO_NC_NPCDELETE)
 		buf2.WriteGInt(uint32(npcId))
-		p.server.sendPacketToType(PLTYPE_ANYNC, buf2.Bytes())
+		p.server.sendBufferToType(PLTYPE_ANYNC, buf2)
 		logMsg := fmt.Sprintf("NPC %s deleted by %s", npcName, p.accountName)
 		p.server.logger.Info(logMsg)
 		p.server.sendToNC(logMsg)
@@ -1768,7 +1768,7 @@ func (p *Player) msgPLI_NC_NPCADD(packet []byte) bool {
 	buf2.WriteGChar(byte(len(newNpc.scriptType))).Write([]byte(newNpc.scriptType))
 	buf2.WriteGChar(NPCPROP_CURLEVEL)
 	buf2.WriteGChar(byte(len(npcLevelName))).Write([]byte(npcLevelName))
-	p.server.sendPacketToType(PLTYPE_ANYNC, buf2.Bytes())
+	p.server.sendBufferToType(PLTYPE_ANYNC, buf2)
 	logMsg := fmt.Sprintf("NPC %s added by %s", npcName, p.accountName)
 	p.server.logger.Info(logMsg)
 	p.server.sendToNC(logMsg)
@@ -1814,7 +1814,7 @@ func (p *Player) msgPLI_NC_CLASSADD(packet []byte) bool {
 		buf2 := NewBuffer()
 		buf2.WriteByte(PLO_NC_CLASSADD)
 		buf2.Write([]byte(className))
-		p.server.sendPacketToType(PLTYPE_ANYNC, buf2.Bytes())
+		p.server.sendBufferToType(PLTYPE_ANYNC, buf2)
 	}
 	logMsg := fmt.Sprintf("Script %s %s by %s", className, map[bool]string{true: "added", false: "updated"}[!hasClass], p.accountName)
 	p.server.logger.Info(logMsg)
@@ -1943,7 +1943,7 @@ func (p *Player) msgPLI_NC_WEAPONDELETE(packet []byte) bool {
 		del := NewBuffer()
 		del.WriteByte(PLO_NPCWEAPONDEL)
 		del.Write([]byte(weaponName))
-		p.server.sendPacketToType(PLTYPE_ANYCLIENT, del.Bytes())
+		p.server.sendBufferToType(PLTYPE_ANYCLIENT, del)
 		logMsg := fmt.Sprintf("Weapon %s deleted by %s", weaponName, p.accountName)
 		p.server.logger.Info(logMsg)
 		p.server.sendToNC(logMsg)
@@ -1972,7 +1972,7 @@ func (p *Player) msgPLI_NC_CLASSDELETE(packet []byte) bool {
 		buf2 := NewBuffer()
 		buf2.WriteByte(PLO_NC_CLASSDELETE)
 		buf2.Write([]byte(className))
-		p.server.sendPacketToType(PLTYPE_ANYNC, buf2.Bytes())
+		p.server.sendBufferToType(PLTYPE_ANYNC, buf2)
 		logMsg := fmt.Sprintf("%s has deleted class %s", p.accountName, className)
 		p.server.logger.Info(logMsg)
 		p.server.sendToNC(logMsg)
