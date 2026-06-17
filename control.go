@@ -2003,3 +2003,12 @@ func (p *Player) msgPLI_NC_LEVELLISTGET(packet []byte) bool {
 	p.send(buf2)
 	return true
 }
+
+func (p *Player) msgPLI_NC_LEVELLISTSET(packet []byte) bool {
+	if p.playerType&PLTYPE_ANYNC == 0 {
+		p.server.logger.Warning("[Hack] %s attempted LEVELLISTSET (non-NC)", p.accountName)
+		return true
+	}
+	p.server.logger.Debug("NC LEVELLISTSET ignored from %s (%d bytes)", p.accountName, len(packet))
+	return true
+}

@@ -2369,6 +2369,8 @@ func (p *Player) handlePacket(packet []byte) bool {
 		return p.msgPLI_NC_CLASSDELETE(packet)
 	case PLI_NC_LEVELLISTGET:
 		return p.msgPLI_NC_LEVELLISTGET(packet)
+	case PLI_NC_LEVELLISTSET:
+		return p.msgPLI_NC_LEVELLISTSET(packet)
 	case PLI_REQUESTTEXT:
 		return p.msgPLI_REQUESTTEXT(packet)
 	case PLI_SENDTEXT:
