@@ -386,6 +386,7 @@ func (p *Player) msgPLI_NC_WEAPONLISTGET(packet []byte) bool {
 	for _, weaponName := range names {
 		buf.WriteByte(byte(len(weaponName))).Write([]byte(weaponName))
 	}
+	p.server.logger.PacketDebug("NC weapon list for %s: names=%q raw=% X", p.accountName, names, buf.Bytes())
 	p.send(buf)
 	return true
 }

@@ -472,6 +472,43 @@ func TestNCWeaponListUsesRawNameLengths(t *testing.T) {
 	}
 }
 
+func TestNCWeaponListAfterWeaponAddIsSingleCleanPacket(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.weapons = map[string]*Weapon{}
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.loaded = true
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+
+	add := NewBuffer()
+	add.WriteByte(PLI_NC_WEAPONADD)
+	add.WriteGChar(byte(len("test")))
+	add.Write([]byte("test"))
+	add.WriteGChar(byte(len("bcalarmclock.png")))
+	add.Write([]byte("bcalarmclock.png"))
+	add.Write([]byte("function onCreated() {\xa7  echo(\"hi\");\xa7}"))
+	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+
+	nc.outQueue = nil
+	if !nc.msgPLI_NC_WEAPONLISTGET([]byte{PLI_NC_WEAPONLISTGET}) {
+		t.Fatalf("msgPLI_NC_WEAPONLISTGET returned false")
+	}
+
+	want := NewBuffer()
+	want.WriteByte(PLO_NC_WEAPONLISTGET + 32)
+	want.WriteString8("test")
+	want.WriteByte('\n')
+	if !bytes.Equal(nc.outQueue, want.Bytes()) {
+		t.Fatalf("weapon list after add = % X, want % X", nc.outQueue, want.Bytes())
+	}
+}
+
 func TestNCWeaponGetParsesPayloadAfterPacketID(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.weapons = map[string]*Weapon{
@@ -520,7 +557,7 @@ func TestNCWeaponGetMissingWeaponReportsToNC(t *testing.T) {
 	}
 }
 
-func TestNCWeaponAddNotifiesRCChat(t *testing.T) {
+func TestNCWeaponAddNotifiesNCChatOnly(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.weapons = map[string]*Weapon{
 		"test": {name: "test", image: "old.png", script: "old();"},
@@ -554,8 +591,8 @@ func TestNCWeaponAddNotifiesRCChat(t *testing.T) {
 
 	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Weapon/GUI-script test updated by moondeath")...)
 	want = append(want, '\n')
-	if !bytes.Contains(rc.outQueue, want) {
-		t.Fatalf("RC did not receive NC weapon update message: % X, want % X", rc.outQueue, want)
+	if bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("RC received duplicate NC weapon update message: % X", rc.outQueue)
 	}
 	if !bytes.Contains(nc.outQueue, want) {
 		t.Fatalf("NC did not receive NC weapon update message: % X, want % X", nc.outQueue, want)
@@ -1235,8 +1272,8 @@ func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
 	if !bytes.Contains(nc.outQueue, welcome) {
 		t.Fatalf("new NC did not receive welcome message: % X", nc.outQueue)
 	}
-	if !bytes.Contains(nc.outQueue, want) {
-		t.Fatalf("new NC did not receive its own new NC message: % X", nc.outQueue)
+	if bytes.Contains(nc.outQueue, want) {
+		t.Fatalf("new NC received duplicate self new-NC message: % X", nc.outQueue)
 	}
 }
 

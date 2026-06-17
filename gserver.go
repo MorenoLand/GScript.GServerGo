@@ -1172,6 +1172,10 @@ func (s *Server) sendRCChat(message string) {
 }
 
 func (s *Server) sendToNC(message string) {
+	s.sendToNCExcept(message, nil)
+}
+
+func (s *Server) sendToNCExcept(message string, exclude *Player) {
 	if s == nil {
 		return
 	}
@@ -1185,7 +1189,7 @@ func (s *Server) sendToNC(message string) {
 	s.playerMu.RLock()
 	targets := make([]*Player, 0, len(s.players))
 	for _, p := range s.players {
-		if p != nil && p.playerType&PLTYPE_ANYCONTROL != 0 {
+		if p != nil && p != exclude && p.playerType&PLTYPE_ANYNC != 0 {
 			targets = append(targets, p)
 		}
 	}
@@ -2085,7 +2089,7 @@ func (p *Player) sendNCPostLoginTail() {
 		}
 	}
 	p.server.playerMu.RUnlock()
-	p.server.sendToNC("New NC: " + p.accountName)
+	p.server.sendToNCExcept("New NC: "+p.accountName, p)
 }
 
 func (s *Server) configuredName() string {
