@@ -3781,6 +3781,28 @@ func TestServerListSendPacketUsesActiveCodec(t *testing.T) {
 	}
 }
 
+func TestServerListProcessDataHandlesRawPing(t *testing.T) {
+	server := &Server{logger: NewLogger("", false)}
+	sl := &ServerList{
+		server:     server,
+		connected:  true,
+		sendQueue:  make(chan []byte, 1),
+		codec:      ENCRYPT_GEN_1,
+		readBuffer: []byte{listserverRawPingPacket + 32, '\n'},
+	}
+
+	sl.processListData()
+
+	if len(sl.readBuffer) != 0 {
+		t.Fatalf("readBuffer length = %d, want 0; bytes=% X", len(sl.readBuffer), sl.readBuffer)
+	}
+	got := <-sl.sendQueue
+	want := []byte{SVO_PING + 32, '\n'}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("raw ping response = % X, want % X", got, want)
+	}
+}
+
 func TestServerListSendTextPacketEncodesIDAndUsesActiveCodec(t *testing.T) {
 	server := &Server{logger: NewLogger("", false)}
 	sl := &ServerList{

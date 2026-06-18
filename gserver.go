@@ -7172,6 +7172,8 @@ type ServerList struct {
 	readBuffer            []byte
 }
 
+const listserverRawPingPacket = 99
+
 func NewServerList(s *Server) *ServerList {
 	return NewServerListEndpoint(s, "", "")
 }
@@ -7401,7 +7403,23 @@ func (sl *ServerList) receiveLoop() {
 
 func (sl *ServerList) processListData() {
 	sl.server.logger.Debug("[LISTSERVER] processListData: %d bytes in buffer", len(sl.readBuffer))
-	for len(sl.readBuffer) >= 2 {
+	for len(sl.readBuffer) > 0 {
+		if sl.readBuffer[0] >= 32 {
+			nl := bytes.IndexByte(sl.readBuffer, '\n')
+			if nl == -1 {
+				break
+			}
+			packet := sl.readBuffer[:nl+1]
+			sl.server.logger.Debug("[LISTSERVER] Processing raw packet line: % X", packet)
+			sl.processListPackets(packet)
+			sl.readBuffer = sl.readBuffer[nl+1:]
+			continue
+		}
+
+		if len(sl.readBuffer) < 2 {
+			break
+		}
+
 		// Read 2-byte length prefix (big-endian)
 		length := int(sl.readBuffer[0])<<8 | int(sl.readBuffer[1])
 		sl.server.logger.Debug("[LISTSERVER] Packet length: %d, have %d", length, len(sl.readBuffer))
@@ -7452,6 +7470,10 @@ func (sl *ServerList) processListPackets(data []byte) {
 func (sl *ServerList) handleListPacket(packetId uint8, data []byte) {
 	sl.server.logger.Debug("[LISTSERVER] Received packet %d: %d bytes", packetId, len(data))
 	switch packetId {
+	case listserverRawPingPacket:
+		buf := NewBuffer()
+		buf.WriteGChar(SVO_PING)
+		sl.SendPacket(buf.Bytes())
 	case SVI_VERIACC:
 		sl.server.logger.Debug("Deprecated account verification response")
 	case SVI_VERIACC2:
