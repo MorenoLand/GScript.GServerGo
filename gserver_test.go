@@ -1508,6 +1508,67 @@ func TestRCPostLoginTailAnnouncesNewRCToAllRCs(t *testing.T) {
 	}
 }
 
+func TestAddPlayerReplacesStaleRCSessionForSameAccount(t *testing.T) {
+	server := newLoginTestServer(t)
+	oldRC := NewPlayer(nil, server)
+	oldRC.id = 6
+	oldRC.playerType = PLTYPE_RC2
+	oldRC.accountName = "moondeath"
+	oldRC.character.nickName = "moondeath"
+	oldRC.loaded = true
+	if !server.AddPlayer(oldRC, oldRC.id) {
+		t.Fatal("old RC was not added")
+	}
+
+	newRC := NewPlayer(nil, server)
+	newRC.id = 7
+	newRC.playerType = PLTYPE_RC2
+	newRC.accountName = "moondeath"
+	newRC.character.nickName = "moondeath"
+	newRC.loaded = true
+	if !server.AddPlayer(newRC, newRC.id) {
+		t.Fatal("new RC was not added")
+	}
+
+	if !oldRC.disconnected {
+		t.Fatal("old RC session was not disconnected")
+	}
+	if got := server.GetPlayer(oldRC.id); got != nil {
+		t.Fatalf("old RC id still present: %#v", got)
+	}
+	if got := server.GetPlayer(newRC.id); got != newRC {
+		t.Fatalf("new RC lookup = %#v, want %#v", got, newRC)
+	}
+	if got := server.GetPlayerCount(); got != 1 {
+		t.Fatalf("player count = %d, want 1", got)
+	}
+}
+
+func TestAddPlayerRejectsDuplicateRegistrationOfSamePlayer(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := NewPlayer(nil, server)
+	rc.id = 6
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "moondeath"
+	rc.character.nickName = "moondeath"
+	rc.loaded = true
+	if !server.AddPlayer(rc, rc.id) {
+		t.Fatal("RC was not added")
+	}
+	if server.AddPlayer(rc, 7) {
+		t.Fatal("duplicate registration returned true")
+	}
+	if got := server.GetPlayerCount(); got != 1 {
+		t.Fatalf("player count = %d, want 1", got)
+	}
+	if got := server.GetPlayer(6); got != rc {
+		t.Fatalf("original RC lookup = %#v, want %#v", got, rc)
+	}
+	if got := server.GetPlayer(7); got != nil {
+		t.Fatalf("duplicate RC id lookup = %#v, want nil", got)
+	}
+}
+
 func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.settings.Set("name", "Orion-Go")

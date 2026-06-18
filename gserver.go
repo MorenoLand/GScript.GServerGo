@@ -900,10 +900,19 @@ func (s *Server) SetFlag(name, value string) {
 func (s *Server) DeleteFlag(name string) { s.flagMu.Lock(); delete(s.flags, name); s.flagMu.Unlock() }
 
 func (s *Server) AddPlayer(player *Player, id uint16) bool {
+	s.removeDuplicateControlSessions(player)
 	s.playerMu.Lock()
 	defer s.playerMu.Unlock()
 	if id == 0 || id == 1 {
 		return false
+	}
+	for existingID, existing := range s.players {
+		if existing == player {
+			if existingID != id {
+				s.logger.Warning("Player %s already registered as %d; ignoring duplicate registration as %d", player.getAccountName(), existingID, id)
+			}
+			return false
+		}
 	}
 	if _, exists := s.players[id]; exists {
 		return false
@@ -919,6 +928,42 @@ func (s *Server) AddPlayer(player *Player, id uint16) bool {
 		}
 	}
 	return true
+}
+
+func (s *Server) removeDuplicateControlSessions(player *Player) {
+	if s == nil || player == nil || player.playerType&PLTYPE_ANYCONTROL == 0 {
+		return
+	}
+	accountName := strings.TrimSpace(player.accountName)
+	if accountName == "" {
+		return
+	}
+	controlMask := 0
+	switch {
+	case player.playerType&PLTYPE_ANYRC != 0:
+		controlMask = PLTYPE_ANYRC
+	case player.playerType&PLTYPE_ANYNC != 0:
+		controlMask = PLTYPE_ANYNC
+	default:
+		return
+	}
+
+	s.playerMu.RLock()
+	duplicates := make([]*Player, 0, 1)
+	for _, other := range s.players {
+		if other == nil || other == player || other.playerType&controlMask == 0 {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(other.accountName), accountName) {
+			duplicates = append(duplicates, other)
+		}
+	}
+	s.playerMu.RUnlock()
+
+	for _, other := range duplicates {
+		s.logger.Info("Removing stale control session for %s (old id %d, new id %d)", accountName, other.getId(), player.getId())
+		other.disconnect()
+	}
 }
 
 func (s *Server) DeletePlayer(player *Player) {
@@ -2029,7 +2074,9 @@ func (p *Player) processPackets() {
 				p.disconnect()
 				return
 			}
-			p.server.AddPlayer(p, p.id)
+			if !p.server.AddPlayer(p, p.id) {
+				continue
+			}
 			if p.playerType&PLTYPE_ANYCLIENT != 0 {
 				p.sendPostLoginTail()
 			} else if p.playerType&PLTYPE_ANYRC != 0 {
