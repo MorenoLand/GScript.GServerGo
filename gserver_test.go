@@ -3575,6 +3575,18 @@ func TestServerListSendsAllowedVersionsText(t *testing.T) {
 	}
 }
 
+func TestListserverPacketIdsMatchGServerV2(t *testing.T) {
+	if SVI_ASSIGNPCID != 30 {
+		t.Fatalf("SVI_ASSIGNPCID = %d, want 30", SVI_ASSIGNPCID)
+	}
+	if SVI_PING != 99 {
+		t.Fatalf("SVI_PING = %d, want 99", SVI_PING)
+	}
+	if SVI_RAWDATA != 100 {
+		t.Fatalf("SVI_RAWDATA = %d, want 100", SVI_RAWDATA)
+	}
+}
+
 func TestServerListRefreshSettingsDoesNotSendCountedSetPlayers(t *testing.T) {
 	server := &Server{
 		name:            "Orion-Go",
@@ -3835,7 +3847,7 @@ func TestServerListProcessDataHandlesRawPing(t *testing.T) {
 		connected:  true,
 		sendQueue:  make(chan []byte, 1),
 		codec:      ENCRYPT_GEN_1,
-		readBuffer: []byte{listserverRawPingPacket + 32, '\n'},
+		readBuffer: []byte{SVI_PING + 32, '\n'},
 	}
 
 	sl.processListData()

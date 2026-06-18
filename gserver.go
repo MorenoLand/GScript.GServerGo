@@ -7172,8 +7172,6 @@ type ServerList struct {
 	readBuffer            []byte
 }
 
-const listserverRawPingPacket = 99
-
 func NewServerList(s *Server) *ServerList {
 	return NewServerListEndpoint(s, "", "")
 }
@@ -7470,10 +7468,6 @@ func (sl *ServerList) processListPackets(data []byte) {
 func (sl *ServerList) handleListPacket(packetId uint8, data []byte) {
 	sl.server.logger.Debug("[LISTSERVER] Received packet %d: %d bytes", packetId, len(data))
 	switch packetId {
-	case listserverRawPingPacket:
-		buf := NewBuffer()
-		buf.WriteGChar(SVO_PING)
-		sl.SendPacket(buf.Bytes())
 	case SVI_VERIACC:
 		sl.server.logger.Debug("Deprecated account verification response")
 	case SVI_VERIACC2:

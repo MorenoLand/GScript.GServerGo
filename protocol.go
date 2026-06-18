@@ -348,10 +348,15 @@ const (
 	_
 	_
 	_
+	_
+	_
+	_
+	_
+	_
 	SVI_PMPLAYER
 	SVI_ASSIGNPCID
-	SVI_PING
-	SVI_RAWDATA
+	SVI_PING    = 99
+	SVI_RAWDATA = 100
 	SVI_PACKETCOUNT
 )
 
