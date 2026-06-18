@@ -3748,6 +3748,64 @@ func TestServerListSendsRCPlayersForPlayerList(t *testing.T) {
 	}
 }
 
+func TestServerAddPlayerWaitsForListserverVerify(t *testing.T) {
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
+	sl := &ServerList{
+		server:    server,
+		connected: true,
+		sendQueue: make(chan []byte, 4),
+		codec:     ENCRYPT_GEN_1,
+	}
+	server.serverList = sl
+	server.serverLists = []*ServerList{sl}
+	rc := &Player{id: 7, server: server, playerType: PLTYPE_RC2, awaitingListserverVerify: true}
+	rc.accountName = "moondeath"
+	rc.character.nickName = "moondeath"
+
+	if !server.AddPlayer(rc, rc.id) {
+		t.Fatal("AddPlayer returned false")
+	}
+	if len(sl.sendQueue) != 0 {
+		t.Fatalf("queued %d listserver packets before verify", len(sl.sendQueue))
+	}
+
+	verify := NewBuffer().
+		WriteString8Encoded("moondeath").
+		WriteGShort(rc.id).
+		WriteGChar(byte(rc.playerType)).
+		Write([]byte("SUCCESS")).
+		Bytes()
+	sl.handleVerifyAccount2(verify)
+
+	if rc.awaitingListserverVerify {
+		t.Fatal("player still waiting for listserver verify after SUCCESS")
+	}
+	select {
+	case packet := <-sl.sendQueue:
+		rcAdd := append([]byte{SVO_PLYRADD + 32}, NewBuffer().WriteGShort(rc.id).Bytes()...)
+		if !bytes.Contains(packet, rcAdd) {
+			t.Fatalf("verify queued packet = % X, want PLYRADD % X", packet, rcAdd)
+		}
+	default:
+		t.Fatal("verify SUCCESS did not queue listserver PLYRADD")
+	}
+}
+
+func TestServerListClearSendQueueDropsStalePackets(t *testing.T) {
+	sl := &ServerList{sendQueue: make(chan []byte, 3)}
+	sl.sendQueue <- []byte("stale registration")
+	sl.sendQueue <- []byte("stale player add")
+
+	sl.clearSendQueue()
+
+	if len(sl.sendQueue) != 0 {
+		t.Fatalf("clearSendQueue left %d stale packets queued", len(sl.sendQueue))
+	}
+}
+
 func TestServerListSendPlayersIncludesNPCServerAndRC(t *testing.T) {
 	server := &Server{
 		logger:   NewLogger("", false),

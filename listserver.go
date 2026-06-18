@@ -90,6 +90,23 @@ func (s *Server) sendLoginPacketToListservers(player *Player, password, identity
 	return sent
 }
 
+func (s *Server) addPlayerToListservers(player *Player) {
+	if s == nil || player == nil {
+		return
+	}
+	seen := make(map[*ServerList]bool)
+	for _, serverList := range s.serverLists {
+		if serverList == nil || seen[serverList] {
+			continue
+		}
+		seen[serverList] = true
+		serverList.AddPlayer(player)
+	}
+	if s.serverList != nil && !seen[s.serverList] {
+		s.serverList.AddPlayer(player)
+	}
+}
+
 func splitCommaList(value string) []string {
 	parts := strings.Split(value, ",")
 	out := make([]string, 0, len(parts))

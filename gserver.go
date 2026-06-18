@@ -982,12 +982,8 @@ func (s *Server) AddPlayer(player *Player, id uint16) bool {
 	player.setId(id)
 	s.players[id] = player
 	s.logger.Info("Player %d added (account: %s)", id, player.getAccountName())
-	if isListserverPlayer(player) {
-		for _, serverList := range s.serverLists {
-			if serverList != nil {
-				serverList.AddPlayer(player)
-			}
-		}
+	if isListserverPlayer(player) && !player.awaitingListserverVerify {
+		s.addPlayerToListservers(player)
 	}
 	return true
 }
@@ -2015,6 +2011,7 @@ type Player struct {
 	isFtp                                                                     bool
 	grMovementUpdated                                                         bool
 	disconnected                                                              bool
+	awaitingListserverVerify                                                  bool
 	firstLevel                                                                bool
 	grMovementPackets                                                         string
 	npcserverPort                                                             string
@@ -2848,7 +2845,7 @@ func (p *Player) handleLogin(packet []byte) bool {
 	p.weaponList = []string{}
 	p.chestList = []string{}
 	p.folderList = []string{}
-	p.server.sendLoginPacketToListservers(p, password, identity)
+	p.awaitingListserverVerify = p.server.sendLoginPacketToListservers(p, password, identity)
 	// Set encryption based on client type
 	p.server.logger.Debug("Setting encryption: clientType=%d PLTYPE_CLIENT=%d PLTYPE_CLIENT2=%d PLTYPE_CLIENT3=%d", clientType, PLTYPE_CLIENT, PLTYPE_CLIENT2, PLTYPE_CLIENT3)
 	switch clientType {
@@ -7206,6 +7203,19 @@ func (sl *ServerList) doTimedEvents() {
 	}
 }
 
+func (sl *ServerList) clearSendQueue() {
+	if sl == nil || sl.sendQueue == nil {
+		return
+	}
+	for {
+		select {
+		case <-sl.sendQueue:
+		default:
+			return
+		}
+	}
+}
+
 func (sl *ServerList) connectServer() bool {
 	if !sl.enabled {
 		return false
@@ -7233,6 +7243,7 @@ func (sl *ServerList) connectServer() bool {
 	}
 	sl.conn = conn
 	sl.connected = true
+	sl.clearSendQueue()
 	sl.lastReceive = time.Now()
 	sl.lastIdleLog = time.Time{}
 	sl.lastKeepalive = time.Now()
@@ -7578,6 +7589,11 @@ func (sl *ServerList) handleVerifyAccount2(data []byte) {
 		player.isLoadOnly = true
 		player.sendPLO_DISCMESSAGE(message)
 		player.disconnect()
+		return
+	}
+	if player.awaitingListserverVerify {
+		player.awaitingListserverVerify = false
+		sl.server.addPlayerToListservers(player)
 	}
 }
 
