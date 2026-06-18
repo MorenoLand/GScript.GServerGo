@@ -686,6 +686,31 @@ func (s *Server) saveWeaponFile(weapon *Weapon) error {
 	return s.config.SaveFile("weapons/weapon"+sanitizeWeaponFileName(weapon.name)+".txt", []byte(out.String()))
 }
 
+func (s *Server) ensureWeaponBytecode(weapon *Weapon) {
+	if s == nil || weapon == nil || weapon.defPlayer || len(weapon.bytecode) > 0 {
+		return
+	}
+	if _, ok := clientsideGS2(weapon.script); !ok {
+		return
+	}
+	result := s.compileGS2ForFeedback("weapon", weapon.name, weapon.script)
+	if result.errText != "" {
+		s.logger.Warning("Failed to compile weapon %s on send: %s", weapon.name, result.errText)
+		return
+	}
+	if result.warningText != "" {
+		s.logger.Warning("Could not compile weapon %s on send: %s", weapon.name, result.warningText)
+		return
+	}
+	if len(result.bytecode) == 0 {
+		return
+	}
+	weapon.bytecode = result.bytecode
+	if err := s.saveWeaponFile(weapon); err != nil {
+		s.logger.Warning("Failed to save compiled weapon %s: %v", weapon.name, err)
+	}
+}
+
 func (s *Server) deleteWeaponFile(name string) error {
 	if s == nil || s.config == nil || name == "" {
 		return nil
@@ -3721,6 +3746,7 @@ func (p *Player) sendAccountWeapon(weaponName string) bool {
 	if weapon == nil {
 		return false
 	}
+	p.server.ensureWeaponBytecode(weapon)
 	p.server.logger.Debug("Sending weapon: %s", weaponName)
 	return p.sendWeapon(weapon)
 }
