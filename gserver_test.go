@@ -3724,12 +3724,17 @@ func TestServerListSendPlayersIncludesNPCServerAndRC(t *testing.T) {
 		codec:     ENCRYPT_GEN_1,
 	}
 	server.serverList = sl
+	server.serverLists = []*ServerList{sl}
 
 	sl.sendPlayers()
 
 	var packets [][]byte
 	for len(sl.sendQueue) > 0 {
 		packets = append(packets, <-sl.sendQueue)
+	}
+	clearPlayers := []byte{SVO_SETPLYR + 32, '\n'}
+	if len(packets) == 0 || !bytes.Equal(packets[0], clearPlayers) {
+		t.Fatalf("sendPlayers first packet = % X, want clear % X; packets=% X", packets[0], clearPlayers, packets)
 	}
 	npcAdd := append([]byte{SVO_PLYRADD + 32}, NewBuffer().WriteGShort(npc.id).Bytes()...)
 	rcAdd := append([]byte{SVO_PLYRADD + 32}, NewBuffer().WriteGShort(rc.id).Bytes()...)
@@ -3739,15 +3744,23 @@ func TestServerListSendPlayersIncludesNPCServerAndRC(t *testing.T) {
 	if !packetListContains(packets, rcAdd) {
 		t.Fatalf("sendPlayers did not include RC player, packets=% X", packets)
 	}
+	if got := packetListCount(packets, npcAdd); got != 1 {
+		t.Fatalf("sendPlayers sent NPC server %d times, want 1; packets=% X", got, packets)
+	}
 }
 
 func packetListContains(packets [][]byte, needle []byte) bool {
+	return packetListCount(packets, needle) > 0
+}
+
+func packetListCount(packets [][]byte, needle []byte) int {
+	count := 0
 	for _, packet := range packets {
 		if bytes.Contains(packet, needle) {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 func TestServerListSendPacketUsesActiveCodec(t *testing.T) {

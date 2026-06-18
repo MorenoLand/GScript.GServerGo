@@ -47,11 +47,6 @@ func (n *NPCServer) Sync() {
 		if player := n.Player(); player != nil {
 			n.applyPlayerSettings(player)
 			n.host.broadcastPlayerListEntryToClients(player)
-			for _, serverList := range n.host.serverLists {
-				if serverList != nil {
-					serverList.AddPlayer(player)
-				}
-			}
 		} else {
 			n.Start()
 		}
