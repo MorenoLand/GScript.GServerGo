@@ -879,7 +879,7 @@ func (p *Player) msgPLI_RC_PLAYERRIGHTSGET(packet []byte) bool {
 		p.send(NewBufferFromBytes(rcChatPacket("Server: You are not authorized to view that player's rights.")))
 		return true
 	}
-	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYPLAYER)
+	targetPlayer := p.server.getPlayerByAccount(accountName, PLTYPE_ANYPLAYER|PLTYPE_NPCSERVER)
 	if targetPlayer == nil {
 		if !p.server.accountExists(accountName) {
 			return true

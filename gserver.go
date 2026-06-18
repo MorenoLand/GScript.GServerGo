@@ -7710,7 +7710,7 @@ func isListserverPlayer(player *Player) bool {
 }
 
 func isPlayerListPlayer(player *Player) bool {
-	return player != nil && player.playerType&PLTYPE_ANYPLAYER != 0
+	return player != nil && player.playerType&(PLTYPE_ANYPLAYER|PLTYPE_NPCSERVER) != 0
 }
 
 func shouldSendClientPlayerListEntry(player *Player) bool {
@@ -7818,7 +7818,6 @@ func (sl *ServerList) refreshServerSettings() {
 	sl.SetUrl(url)
 	sl.SetIp(ip)
 	sl.SetPort(port)
-	sl.SetPlyr(sl.server.GetPlayerCount())
 	sl.sendVersionConfig()
 }
 

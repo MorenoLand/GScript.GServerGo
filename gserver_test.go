@@ -2019,14 +2019,26 @@ func TestGetPlayerByAccountHonorsTypeMask(t *testing.T) {
 	server.players[npc.id] = npc
 	server.players[client.id] = client
 
-	if got := server.getPlayerByAccount("(npcserver)", PLTYPE_ANYPLAYER); got != npc {
-		t.Fatalf("ANYPLAYER npc lookup = %#v, want npc", got)
+	if got := server.getPlayerByAccount("(npcserver)", PLTYPE_ANYPLAYER); got != nil {
+		t.Fatalf("ANYPLAYER npc lookup = %#v, want nil", got)
+	}
+	if got := server.getPlayerByAccount("(npcserver)", PLTYPE_ANYPLAYER|PLTYPE_NPCSERVER); got != npc {
+		t.Fatalf("ANYPLAYER|NPCSERVER npc lookup = %#v, want npc", got)
 	}
 	if got := server.getPlayerByAccount("(npcserver)", PLTYPE_ANYCLIENT); got != nil {
 		t.Fatalf("ANYCLIENT npc lookup = %#v, want nil", got)
 	}
 	if got := server.getPlayerByAccount("moondeath", PLTYPE_ANYCLIENT); got != client {
 		t.Fatalf("ANYCLIENT client lookup = %#v, want client", got)
+	}
+}
+
+func TestPlayerTypeMasksMatchControlAndNPCSemantics(t *testing.T) {
+	if PLTYPE_ANYPLAYER&PLTYPE_NPCSERVER != 0 {
+		t.Fatal("PLTYPE_ANYPLAYER includes NPC-server; want clients and RC only")
+	}
+	if !isPlayerListPlayer(&Player{playerType: PLTYPE_NPCSERVER}) {
+		t.Fatal("NPC-server should still be visible in player lists")
 	}
 }
 
@@ -3526,6 +3538,40 @@ func TestServerListSendsAllowedVersionsText(t *testing.T) {
 	want = append(want, '\n')
 	if !bytes.Equal(got, want) {
 		t.Fatalf("allowed versions packet = % X, want % X", got, want)
+	}
+}
+
+func TestServerListRefreshSettingsDoesNotSendCountedSetPlayers(t *testing.T) {
+	server := &Server{
+		name:            "Orion-Go",
+		logger:          NewLogger("", false),
+		settings:        NewSettings(),
+		players:         make(map[uint16]*Player),
+		allowedVersions: []string{"GNW22122", "G3D0311C"},
+	}
+	server.settings.Set("name", "Orion-Go")
+	server.settings.Set("description", "Go Code GServer")
+	server.settings.Set("language", "English")
+	server.settings.Set("url", "https://github.com/MorenoLand/GScript.GServerGo")
+	server.settings.Set("serverip", "orion.moreno.land")
+	server.settings.Set("serverport", "14802")
+	server.players[1] = &Player{id: 1, playerType: PLTYPE_NPCSERVER}
+	server.players[2] = &Player{id: 2, playerType: PLTYPE_CLIENT3}
+	server.players[3] = &Player{id: 3, playerType: PLTYPE_RC2}
+	sl := &ServerList{
+		server:    server,
+		connected: true,
+		sendQueue: make(chan []byte, 16),
+		codec:     ENCRYPT_GEN_1,
+	}
+
+	sl.refreshServerSettings()
+
+	for len(sl.sendQueue) > 0 {
+		packet := <-sl.sendQueue
+		if len(packet) > 0 && packet[0] == SVO_SETPLYR+32 {
+			t.Fatalf("refreshServerSettings sent counted SETPLYR packet: % X", packet)
+		}
 	}
 }
 
