@@ -186,9 +186,19 @@ func TestLoadSettingsAppliesNPCServerNicknameFromServerOptions(t *testing.T) {
 	}
 
 	writeOptions("serverside = true\nnickname = Script-NPC\n")
+	rc := NewPlayer(nil, server)
+	rc.id = 2
+	rc.playerType = PLTYPE_RC2
+	rc.loaded = true
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
 	server.loadSettings()
 	if npc.character.nickName != "Script-NPC (Server)" {
 		t.Fatalf("npc-server nickname after reload = %q, want Script-NPC (Server)", npc.character.nickName)
+	}
+	if !bytes.Contains(rc.outQueue, []byte("Script-NPC (Server)")) {
+		t.Fatalf("RC did not receive npc-server nickname refresh: % X", rc.outQueue)
 	}
 }
 

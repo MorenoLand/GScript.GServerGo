@@ -55,8 +55,12 @@ func (n *NPCServer) Sync() {
 	}
 	if n.Enabled() {
 		if player := n.Player(); player != nil {
+			oldNick := player.character.nickName
+			oldHead := player.character.headImage
 			n.applyPlayerSettings(player)
-			n.host.broadcastPlayerListEntryToClients(player)
+			if oldNick != player.character.nickName || oldHead != player.character.headImage {
+				n.host.refreshPlayerListEntry(player)
+			}
 		} else {
 			n.Start()
 		}

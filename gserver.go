@@ -7944,6 +7944,29 @@ func (s *Server) broadcastPlayerListEntryToClients(player *Player) {
 	}
 }
 
+func (s *Server) refreshPlayerListEntry(player *Player) {
+	if s == nil || player == nil {
+		return
+	}
+	s.broadcastPlayerListEntryToClients(player)
+	s.playerMu.RLock()
+	targets := make([]*Player, 0, len(s.players))
+	for _, other := range s.players {
+		if other != nil && other != player && (other.conn != nil || other.queueOutgoing) && other.isLoggedIn() && other.playerType&PLTYPE_ANYCONTROL != 0 {
+			targets = append(targets, other)
+		}
+	}
+	s.playerMu.RUnlock()
+	for _, other := range targets {
+		other.sendPLO_ADDPLAYER(player)
+	}
+	for _, serverList := range s.serverLists {
+		if serverList != nil {
+			serverList.AddPlayer(player)
+		}
+	}
+}
+
 func (sl *ServerList) sendPlayerAdd(player *Player) {
 	buf := NewBuffer()
 	buf.WriteGChar(SVO_PLYRADD)
