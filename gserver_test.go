@@ -4630,9 +4630,12 @@ func TestSendPropsWithArrayEncodesPropertyIDs(t *testing.T) {
 	}
 }
 
-func TestLoginPropsMatchReferenceByOmittingNickname(t *testing.T) {
-	if sendLoginProps[PLPROP_NICKNAME] {
-		t.Fatalf("sendLoginProps includes PLPROP_NICKNAME, but C++ __sendLogin omits it")
+func TestLoginPropsMatchReferenceBySendingNickname(t *testing.T) {
+	if !sendLoginProps[PLPROP_NICKNAME] {
+		t.Fatalf("sendLoginProps omitted PLPROP_NICKNAME")
+	}
+	if !sendLocalProps[PLPROP_NICKNAME] {
+		t.Fatalf("sendLocalProps omitted PLPROP_NICKNAME")
 	}
 	if !sendLoginProps[PLPROP_MAXPOWER] || !sendLoginProps[PLPROP_CURPOWER] {
 		t.Fatalf("sendLoginProps lost core health props")

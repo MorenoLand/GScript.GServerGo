@@ -494,7 +494,7 @@ const PROPCOUNT = 83
 
 // __sendLogin - which properties to send to client during login (from Player.cpp line 53)
 var sendLoginProps = [PROPCOUNT]bool{
-	false, true, true, true, true, true, // 0-5
+	true, true, true, true, true, true, // 0-5
 	true, false, true, true, true, true, // 6-11
 	false, true, false, false, false, true, // 12-17
 	true, false, false, true, true, true, // 18-23
@@ -507,7 +507,7 @@ var sendLoginProps = [PROPCOUNT]bool{
 	true, true, true, true, true, true, // 60-65
 	true, true, true, true, true, true, // 66-71
 	true, true, true, false, false, false, // 72-77
-	false, false, false, false, true, // 78-82
+	true, true, true, false, true, // 78-82
 }
 
 // __getLogin - which properties to send to other clients (from Player.cpp line 70)
@@ -520,7 +520,7 @@ var getLoginProps = [PROPCOUNT]bool{
 	true, true, true, false, true, true, // 30-35
 	true, true, true, true, true, true, // 36-41
 	false, true, true, true, true, true, // 42-47
-	true, true, true, false, false, true, // 48-53
+	true, true, false, false, false, true, // 48-53
 	true, true, true, true, true, true, // 54-59
 	true, true, true, true, true, true, // 60-65
 	true, true, true, true, true, true, // 66-71
@@ -530,20 +530,20 @@ var getLoginProps = [PROPCOUNT]bool{
 
 // __sendLocal - properties forwarded to nearby players when a client updates props.
 var sendLocalProps = [PROPCOUNT]bool{
-	false, false, true, false, false, false, // 0-5
+	true, false, true, false, false, false, // 0-5
 	false, false, true, true, true, true, // 6-11
 	true, true, false, true, true, true, // 12-17
-	true, true, true, true, false, false, // 18-23
-	true, true, false, false, false, false, // 24-29
+	true, true, true, true, false, true, // 18-23
+	true, false, false, false, false, false, // 24-29
 	true, true, true, false, true, true, // 30-35
 	true, true, true, true, true, true, // 36-41
 	false, true, true, true, true, true, // 42-47
-	true, true, true, false, false, true, // 48-53
+	true, true, false, false, false, true, // 48-53
 	true, true, true, true, true, true, // 54-59
 	true, true, true, true, true, true, // 60-65
 	true, true, true, true, true, true, // 66-71
 	true, true, true, false, false, false, // 72-77
-	true, true, true, false, true, // 78-82
+	true, true, true, true, true, // 78-82
 }
 
 // __getRCLogin - which properties to send to RCs (from Player.cpp line 105)
