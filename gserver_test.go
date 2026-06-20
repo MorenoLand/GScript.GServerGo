@@ -3806,6 +3806,24 @@ func TestServerListClearSendQueueDropsStalePackets(t *testing.T) {
 	}
 }
 
+func TestServerListResetSendQueueUsesFreshQueue(t *testing.T) {
+	oldQueue := make(chan []byte, 1)
+	sl := &ServerList{sendQueue: oldQueue}
+
+	sl.resetSendQueue()
+
+	if sl.sendQueue == oldQueue {
+		t.Fatal("resetSendQueue reused the old queue")
+	}
+	sl.sendQueue <- []byte("fresh registration")
+	if len(oldQueue) != 0 {
+		t.Fatalf("fresh packet landed in old queue; old len=%d", len(oldQueue))
+	}
+	if len(sl.sendQueue) != 1 {
+		t.Fatalf("fresh queue len=%d, want 1", len(sl.sendQueue))
+	}
+}
+
 func TestServerListSendPlayersIncludesNPCServerAndRC(t *testing.T) {
 	server := &Server{
 		logger:   NewLogger("", false),

@@ -7165,6 +7165,8 @@ type ServerList struct {
 	lastReceive           time.Time
 	lastIdleLog           time.Time
 	lastKeepalive         time.Time
+	lastConnect           time.Time
+	lastDisconnect        time.Time
 	codec                 uint32
 	readBuffer            []byte
 }
@@ -7183,24 +7185,35 @@ func (sl *ServerList) doTimedEvents() {
 	}
 	now := time.Now()
 	sl.lastTimer = now
-	if !sl.connected && now.After(sl.nextConnectionAttempt) {
-		if !sl.connectServer() {
-			if sl.connectionAttempts < 8 {
-				sl.connectionAttempts++
-			}
-			waitTime := time.Duration(1<<uint(sl.connectionAttempts)) * time.Second
-			if waitTime > 300*time.Second {
-				waitTime = 300 * time.Second
-			}
-			sl.nextConnectionAttempt = now.Add(waitTime)
-		} else {
+	if sl.connected {
+		// Decay backoff counter after the connection has been stable for a while.
+		if sl.connectionAttempts > 0 && !sl.lastConnect.IsZero() && now.Sub(sl.lastConnect) >= 30*time.Second {
 			sl.connectionAttempts = 0
 		}
+		if now.Sub(sl.lastKeepalive) >= time.Minute {
+			sl.lastKeepalive = now
+			sl.sendSetIPKeepalive()
+		}
+		return
 	}
-	if sl.connected && now.Sub(sl.lastKeepalive) >= time.Minute {
-		sl.lastKeepalive = now
-		sl.sendSetIPKeepalive()
+	if !now.After(sl.nextConnectionAttempt) {
+		return
 	}
+	if !sl.connectServer() {
+		if sl.connectionAttempts < 8 {
+			sl.connectionAttempts++
+		}
+		sl.applyReconnectBackoff(now)
+	}
+}
+
+func (sl *ServerList) applyReconnectBackoff(now time.Time) {
+	waitTime := time.Duration(1<<uint(sl.connectionAttempts)) * time.Second
+	if waitTime > 300*time.Second {
+		waitTime = 300 * time.Second
+	}
+	waitTime += time.Duration(rand.Intn(5)) * time.Second
+	sl.nextConnectionAttempt = now.Add(waitTime)
 }
 
 func (sl *ServerList) clearSendQueue() {
@@ -7214,6 +7227,13 @@ func (sl *ServerList) clearSendQueue() {
 			return
 		}
 	}
+}
+
+func (sl *ServerList) resetSendQueue() {
+	if sl == nil {
+		return
+	}
+	sl.sendQueue = make(chan []byte, 100)
 }
 
 func (sl *ServerList) connectServer() bool {
@@ -7241,9 +7261,9 @@ func (sl *ServerList) connectServer() bool {
 		sl.server.logger.Error("Could not connect listserver socket: %v", err)
 		return false
 	}
+	sl.resetSendQueue()
 	sl.conn = conn
 	sl.connected = true
-	sl.clearSendQueue()
 	sl.lastReceive = time.Now()
 	sl.lastIdleLog = time.Time{}
 	sl.lastKeepalive = time.Now()
@@ -7324,6 +7344,7 @@ func (sl *ServerList) connectServer() bool {
 		buf.WriteGChar(SVO_SERVERHQLEVEL).WriteGChar(byte(hqLevel))
 	}
 	sl.sendPacket(buf.Bytes())
+	sl.lastConnect = time.Now()
 	sl.sendVersionConfig()
 	sl.sendPlayers()
 	return true
@@ -7407,6 +7428,15 @@ func (sl *ServerList) receiveLoop() {
 		sl.processListData()
 	}
 	sl.connected = false
+	sl.lastDisconnect = time.Now()
+	// If the connection was short-lived, apply backoff to avoid hammering the listserver.
+	if !sl.lastConnect.IsZero() && sl.lastDisconnect.Sub(sl.lastConnect) < 30*time.Second {
+		if sl.connectionAttempts < 8 {
+			sl.connectionAttempts++
+		}
+		sl.applyReconnectBackoff(sl.lastDisconnect)
+		sl.server.logger.Debug("[LISTSERVER] Short-lived connection detected, backing off %s before reconnect", time.Until(sl.nextConnectionAttempt).Round(time.Second))
+	}
 	sl.server.logger.Debug("[LISTSERVER] receiveLoop exiting")
 }
 
