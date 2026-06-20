@@ -6209,6 +6209,49 @@ func TestPlayerChatCommandSendsLocalPropsWithPacketTerminator(t *testing.T) {
 	}
 }
 
+func TestPlayerChatCommandReconnectRequestsCurrentServerInfo(t *testing.T) {
+	server := &Server{logger: NewLogger("", false), name: "Orion-Go", players: make(map[uint16]*Player), settings: NewSettings()}
+	sl := &ServerList{server: server, connected: true, enabled: true, codec: ENCRYPT_GEN_1, sendQueue: make(chan []byte, 1)}
+	server.serverList = sl
+	p := NewPlayer(nil, server)
+	p.id = 321
+	p.queueOutgoing = true
+	p.accountName = "moondeath"
+	packet := NewBuffer()
+	packet.WriteByte(PLI_PLAYERPROPS)
+	packet.WriteGChar(PLPROP_CURCHAT).WriteGChar(byte(len("/reconnect"))).Write([]byte("/reconnect"))
+	if !p.msgPLI_PLAYERPROPS(packet.Bytes()) {
+		t.Fatal("msgPLI_PLAYERPROPS returned false")
+	}
+	got := <-sl.sendQueue
+	want := NewBuffer().WriteGChar(SVO_SERVERINFO).WriteGShort(321).Write([]byte("Orion-Go")).WriteByte('\n').Bytes()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("reconnect listserver request = % X, want % X", got, want)
+	}
+}
+
+func TestPlayerChatCommandReconnectFallsBackToLocalServerWarp(t *testing.T) {
+	settings := NewSettings()
+	settings.Set("serverip", "orion.moreno.land")
+	settings.Set("serverport", "14802")
+	server := &Server{logger: NewLogger("", false), name: "Orion-Go", players: make(map[uint16]*Player), settings: settings}
+	p := NewPlayer(nil, server)
+	p.id = 321
+	p.queueOutgoing = true
+	p.accountName = "moondeath"
+	packet := NewBuffer()
+	packet.WriteByte(PLI_PLAYERPROPS)
+	packet.WriteGChar(PLPROP_CURCHAT).WriteGChar(byte(len("reconnect"))).Write([]byte("reconnect"))
+	if !p.msgPLI_PLAYERPROPS(packet.Bytes()) {
+		t.Fatal("msgPLI_PLAYERPROPS returned false")
+	}
+	want := append([]byte{PLO_SERVERWARP + 32}, []byte("P Orion-Go orion.moreno.land:14802")...)
+	want = append(want, '\n')
+	if !bytes.Contains(p.outQueue, want) {
+		t.Fatalf("reconnect fallback missing % X in % X", want, p.outQueue)
+	}
+}
+
 func TestPlayerChatCommandShowAdminsSendsChatProp(t *testing.T) {
 	level := NewLevel()
 	level.levelName = "onlinestartlocal.nw"

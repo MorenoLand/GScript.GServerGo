@@ -47,6 +47,8 @@ func (p *Player) handlePlayerChatCommand(chat string) bool {
 		p.server.logger.Debug("PLAYERCHAT command candidate from %s: %s", p.accountName, trimmed)
 	}
 	switch command {
+	case "/reconnect", "reconnect":
+		return p.handlePlayerChatReconnect()
 	case "setnick":
 		return p.handlePlayerChatSetNick(trimmed)
 	case "sethead":
@@ -94,6 +96,32 @@ func (p *Player) handlePlayerChatCommand(chat string) bool {
 		return p.handlePlayerChatToGuild(trimmed)
 	}
 	return false
+}
+
+func (p *Player) handlePlayerChatReconnect() bool {
+	serverName := strings.TrimSpace(p.server.name)
+	if serverName == "" && p.server.settings != nil {
+		serverName = strings.TrimSpace(p.server.settings.Get("name"))
+	}
+	if serverName == "" {
+		p.setChat("(server name is not set)")
+		return true
+	}
+	p.clearChatWithProps()
+	if !p.server.sendPlayerTextToListservers(SVO_SERVERINFO, p.id, serverName) {
+		ip := strings.TrimSpace(p.server.settings.Get("serverip"))
+		if ip == "" || strings.EqualFold(ip, "AUTO") {
+			ip = "127.0.0.1"
+		}
+		port := strings.TrimSpace(p.server.settings.Get("serverport"))
+		if port == "" {
+			port = "14802"
+		}
+		out := NewBuffer()
+		out.WriteByte(PLO_SERVERWARP).Write([]byte(fmt.Sprintf("P %s %s:%s", serverName, ip, port)))
+		p.send(out)
+	}
+	return true
 }
 
 func (p *Player) handlePlayerChatSetNick(chat string) bool {
