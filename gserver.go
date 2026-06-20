@@ -2345,8 +2345,11 @@ func (p *Player) rcDisplayName() string {
 	}
 	account := strings.TrimSpace(p.accountName)
 	nick := strings.TrimSpace(p.character.nickName)
-	if nick == "" || strings.EqualFold(nick, account) {
+	if nick == "" {
 		return account
+	}
+	if strings.EqualFold(nick, account) {
+		return "*" + account
 	}
 	if account == "" {
 		return nick

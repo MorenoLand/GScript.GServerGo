@@ -940,7 +940,12 @@ func (p *Player) sendScriptHelp(query string) bool {
 }
 
 func wildcardRegex(query string) (*regexp.Regexp, error) {
-	pattern := "^" + strings.ReplaceAll(regexp.QuoteMeta(strings.ToLower(query)), "\\*", ".*") + "$"
+	query = strings.ToLower(strings.TrimSpace(query))
+	pattern := regexp.QuoteMeta(query)
+	if strings.Contains(query, "*") {
+		pattern = strings.ReplaceAll(pattern, "\\*", ".*")
+	}
+	pattern = "^.*" + pattern + ".*$"
 	return regexp.Compile(pattern)
 }
 

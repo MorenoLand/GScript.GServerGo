@@ -624,6 +624,7 @@ func TestNCWeaponListAfterWeaponAddIsSingleCleanPacket(t *testing.T) {
 	nc.id = 3
 	nc.playerType = PLTYPE_NC
 	nc.accountName = "moondeath"
+	nc.character.nickName = "moondeath"
 	nc.loaded = true
 	nc.queueOutgoing = true
 	nc.encryption.SetGen(ENCRYPT_GEN_1)
@@ -909,6 +910,7 @@ func TestNCWeaponAddNotifiesNCChatOnly(t *testing.T) {
 	nc.id = 3
 	nc.playerType = PLTYPE_NC
 	nc.accountName = "moondeath"
+	nc.character.nickName = "moondeath"
 	nc.loaded = true
 	nc.queueOutgoing = true
 	nc.encryption.SetGen(ENCRYPT_GEN_1)
@@ -1724,6 +1726,7 @@ func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
 	nc.id = 3
 	nc.playerType = PLTYPE_NC
 	nc.accountName = "moondeath"
+	nc.character.nickName = "moondeath"
 	nc.loaded = true
 	nc.queueOutgoing = true
 	nc.encryption.SetGen(ENCRYPT_GEN_1)
@@ -1731,7 +1734,7 @@ func TestNCPostLoginTailAnnouncesNewNCToOtherNCs(t *testing.T) {
 
 	nc.sendNCPostLoginTail()
 
-	want := append([]byte{PLO_RC_CHAT + 32}, []byte("New NC: moondeath")...)
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("New NC: *moondeath")...)
 	want = append(want, '\n')
 	if !bytes.Contains(existing.outQueue, want) {
 		t.Fatalf("existing NC did not receive new NC message: % X", existing.outQueue)
@@ -2362,6 +2365,23 @@ func TestRCChatOpenRightsDispatchesCommand(t *testing.T) {
 	want = append(want, []byte("moondeath")...)
 	if !bytes.Contains(rc.outQueue, want) {
 		t.Fatalf("openrights did not dispatch rights packet: % X, want prefix % X", rc.outQueue, want)
+	}
+}
+
+func TestScriptHelpWildcardRegexMatchesPlainPrefixesAndWildcards(t *testing.T) {
+	plain, err := wildcardRegex("disableweapon")
+	if err != nil {
+		t.Fatalf("plain regex: %v", err)
+	}
+	if !plain.MatchString("disableweapons") || !plain.MatchString("tserverplayer.disableweapons") {
+		t.Fatalf("plain scripthelp regex did not match disableweapons names")
+	}
+	wild, err := wildcardRegex("disable*w")
+	if err != nil {
+		t.Fatalf("wild regex: %v", err)
+	}
+	if !wild.MatchString("disableweapons") || wild.MatchString("disablepause") {
+		t.Fatalf("wildcard scripthelp regex mismatch")
 	}
 }
 
