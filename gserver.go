@@ -2045,8 +2045,6 @@ type Player struct {
 	outEncryption                                                             Encryption
 	queueOutgoing                                                             bool
 	outQueue                                                                  []byte
-	processingPackets                                                         bool
-	deferredSelfPackets                                                       [][]byte
 	version, os, serverName                                                   string
 	id                                                                        uint16
 	envCodePage                                                               int
@@ -2171,29 +2169,11 @@ func (p *Player) OnRecv() bool {
 	if len(p.recvBuffer) > 0 {
 		p.server.logger.PacketDebug("OnRecv: buffer[0]=%02X buffer[1]=%02X", p.recvBuffer[0], p.recvBuffer[1])
 	}
-	p.processingPackets = true
 	p.processPackets()
-	p.processingPackets = false
-	p.flushDeferredSelfPackets()
 	return true
 }
 
 func (p *Player) OnSend() bool { return true }
-
-func (p *Player) deferSelfPacket(packet []byte) {
-	p.deferredSelfPackets = append(p.deferredSelfPackets, append([]byte(nil), packet...))
-}
-
-func (p *Player) flushDeferredSelfPackets() {
-	if len(p.deferredSelfPackets) == 0 {
-		return
-	}
-	packets := p.deferredSelfPackets
-	p.deferredSelfPackets = nil
-	for _, packet := range packets {
-		p.sendPacket(packet)
-	}
-}
 
 func (p *Player) processPackets() {
 	for len(p.recvBuffer) >= 2 {

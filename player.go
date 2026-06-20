@@ -369,13 +369,9 @@ func (p *Player) sendPlayerPropChanges(propIds ...int) {
 	if len(selfProps) > 0 {
 		packet := append([]byte{PLO_PLAYERPROPS}, selfProps...)
 		if p.server != nil && p.server.logger != nil {
-			p.server.logger.Debug("PLAYERCHAT source props queueOutgoing=%v processing=%v len=%d", p.queueOutgoing, p.processingPackets, len(packet))
+			p.server.logger.Debug("PLAYERCHAT source props queueOutgoing=%v len=%d", p.queueOutgoing, len(packet))
 		}
-		if p.processingPackets {
-			p.deferSelfPacket(packet)
-		} else {
-			p.sendPacket(packet)
-		}
+		p.SendPacket(packet)
 	}
 	p.sendPlayerPropDeltasToCurrentLevel(common.Bytes(), legacy.Bytes(), precise.Bytes())
 }
