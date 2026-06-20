@@ -4594,7 +4594,11 @@ func (p *Player) msgPLI_PLAYERPROPS(packet []byte) bool {
 		case PLPROP_NICKNAME:
 			val := buf.ReadGCharString()
 			if val != "" && val != "unknown" {
+				oldNick := p.character.nickName
 				p.setNickname(val)
+				if oldNick != p.character.nickName {
+					p.server.sendRCChat(p.accountName + " changed his/her nick to " + p.character.nickName)
+				}
 			}
 		case PLPROP_MAXPOWER:
 			p.maxHitpoints = buf.ReadGChar()

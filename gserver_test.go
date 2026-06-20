@@ -5478,6 +5478,35 @@ func TestPlayerNicknamePropForcesAccountNicknameStarPrefix(t *testing.T) {
 	}
 }
 
+func TestPlayerNicknameChangeAnnouncesToRC(t *testing.T) {
+	server := &Server{
+		logger:  NewLogger("", false),
+		players: make(map[uint16]*Player),
+	}
+	p := &Player{server: server}
+	p.accountName = "Denveous"
+	p.character.nickName = "Denveous"
+	rc := NewPlayer(nil, server)
+	rc.id = 2
+	rc.playerType = PLTYPE_RC2
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_PLAYERPROPS)
+	packet.WriteGChar(PLPROP_NICKNAME).WriteGChar(byte(len("Denveous2"))).Write([]byte("Denveous2"))
+
+	if !p.msgPLI_PLAYERPROPS(packet.Bytes()) {
+		t.Fatalf("msgPLI_PLAYERPROPS returned false")
+	}
+	want := append([]byte{PLO_RC_CHAT + 32}, []byte("Denveous changed his/her nick to Denveous2")...)
+	want = append(want, '\n')
+	if !bytes.Contains(rc.outQueue, want) {
+		t.Fatalf("RC nick change notice = % X, want % X", rc.outQueue, want)
+	}
+}
+
 func TestPlayerPropsForwardsChangedPropsToOtherPlayers(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()
