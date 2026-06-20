@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -53,6 +51,52 @@ func TestLoadSettingsControlsPacketDebugSeparately(t *testing.T) {
 	if !PACKET_DEBUG_MODE {
 		t.Fatalf("PACKET_DEBUG_MODE = false, want true")
 	}
+}
+
+func TestListserverPacketDebugRequiresPacketDebugMode(t *testing.T) {
+	oldDebugMode := DEBUG_MODE
+	oldPacketDebugMode := PACKET_DEBUG_MODE
+	t.Cleanup(func() {
+		DEBUG_MODE = oldDebugMode
+		PACKET_DEBUG_MODE = oldPacketDebugMode
+	})
+	DEBUG_MODE = true
+	PACKET_DEBUG_MODE = false
+	server := &Server{logger: NewLogger("", false)}
+	sl := &ServerList{server: server, connected: true, codec: ENCRYPT_GEN_2, sendQueue: make(chan []byte, 2)}
+	output := captureStdout(t, func() {
+		sl.sendPacket([]byte{SVO_PING})
+	})
+	if strings.Contains(output, "[LISTSERVER] GEN_2 Sending") {
+		t.Fatalf("listserver packet debug leaked with packetdebugmode false: %q", output)
+	}
+	PACKET_DEBUG_MODE = true
+	output = captureStdout(t, func() {
+		sl.sendPacket([]byte{SVO_PING})
+	})
+	if !strings.Contains(output, "[LISTSERVER] GEN_2 Sending") {
+		t.Fatalf("listserver packet debug did not print with packetdebugmode true: %q", output)
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = writer
+	fn()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	os.Stdout = oldStdout
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return string(output)
 }
 
 func TestProcessAPIncrementsAndBroadcastsAlignment(t *testing.T) {
@@ -149,62 +193,15 @@ func TestGS2CompilerHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestGS2VMHostHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_GS2VM_HELPER_PROCESS") != "1" {
-		return
-	}
-	if len(os.Args) < 5 {
-		fmt.Fprintln(os.Stderr, "missing vm args")
-		os.Exit(2)
-	}
-	data, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	if strings.Contains(string(data), "triggerclient") {
-		fmt.Fprintln(os.Stdout, "TRIGGERCLIENT\ttest\tkek")
-		os.Exit(0)
-	}
-	if strings.Contains(string(data), "serverr.poopybutthole") {
-		flags := map[string]string{}
-		options := map[string]string{}
-		if raw := os.Getenv("GS2_SERVER_FLAGS"); raw != "" {
-			decoded, _ := base64.StdEncoding.DecodeString(raw)
-			_ = json.Unmarshal(decoded, &flags)
-		}
-		if raw := os.Getenv("GS2_SERVER_OPTIONS"); raw != "" {
-			decoded, _ := base64.StdEncoding.DecodeString(raw)
-			_ = json.Unmarshal(decoded, &options)
-		}
-		fmt.Printf("ECHO\t%s:%s\n", flags["serverr.poopybutthole"], options["staff"])
-		os.Exit(0)
-	}
-	if strings.Contains(string(data), "player.account") {
-		player := map[string]string{}
-		if raw := os.Getenv("GS2_PLAYER"); raw != "" {
-			decoded, _ := base64.StdEncoding.DecodeString(raw)
-			_ = json.Unmarshal(decoded, &player)
-		}
-		fmt.Printf("ECHO\t%s\n", player["account"])
-		os.Exit(0)
-	}
-	fmt.Printf("ECHO\t%s:%s:%s:%s\n", os.Args[len(os.Args)-3], os.Args[len(os.Args)-2], os.Args[len(os.Args)-1], strings.TrimSpace(string(data)))
-	os.Exit(0)
-}
-
-func TestRunServerSideGS2UsesConfiguredHostAndStripsClientsideBlock(t *testing.T) {
-	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
+func TestRunServerSideGS2UsesNativeVMAndStripsClientsideBlock(t *testing.T) {
 	server := &Server{logger: NewLogger("", false), settings: NewSettings()}
-	server.settings.Set("gs2vmhost", os.Args[0])
-	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
 
 	result := server.runServerSideGS2("weapon", "test", "onCreated", "function onCreated(){ echo(\"server\"); }\n//#CLIENTSIDE\nfunction onCreated(){ echo(\"client\"); }")
 
 	if result.err != "" {
 		t.Fatalf("runServerSideGS2 err = %q", result.err)
 	}
-	if len(result.output) != 1 || !strings.Contains(result.output[0], "weapon:test:onCreated:function onCreated(){ echo(\"server\"); }") {
+	if len(result.output) != 1 || result.output[0] != "server" {
 		t.Fatalf("runServerSideGS2 output = %#v", result.output)
 	}
 	if strings.Contains(result.output[0], "client") {
@@ -213,10 +210,7 @@ func TestRunServerSideGS2UsesConfiguredHostAndStripsClientsideBlock(t *testing.T
 }
 
 func TestRunServerSideGS2ExportsServerFlagsAndOptions(t *testing.T) {
-	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
 	server := &Server{logger: NewLogger("", false), settings: NewSettings(), flags: map[string]string{"serverr.poopybutthole": "true"}}
-	server.settings.Set("gs2vmhost", os.Args[0])
-	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
 	server.settings.Set("staff", "(Manager) moondeath")
 
 	result := server.runServerSideGS2("weapon", "test", "onCreated", "function onCreated(){ echo(serverr.poopybutthole SPC serveroptions.staff); }")
@@ -224,13 +218,12 @@ func TestRunServerSideGS2ExportsServerFlagsAndOptions(t *testing.T) {
 	if result.err != "" {
 		t.Fatalf("runServerSideGS2 err = %q", result.err)
 	}
-	if len(result.output) != 1 || result.output[0] != "true:(Manager) moondeath" {
+	if len(result.output) != 1 || result.output[0] != "true (Manager) moondeath" {
 		t.Fatalf("runServerSideGS2 output = %#v", result.output)
 	}
 }
 
 func TestTriggerActionServersideWeaponSendsTriggerClient(t *testing.T) {
-	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
 	server := &Server{
 		logger:          NewLogger("", false),
 		settings:        NewSettings(),
@@ -239,8 +232,6 @@ func TestTriggerActionServersideWeaponSendsTriggerClient(t *testing.T) {
 		weapons:         make(map[string]*Weapon),
 		triggerCommands: make(map[string]func(*Player, []string) bool),
 	}
-	server.settings.Set("gs2vmhost", os.Args[0])
-	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
 	server.initTriggerCommands()
 	server.AddWeapon(&Weapon{name: "test", script: "function onActionServerSide() { triggerclient(\"weapon\", name, \"kek\"); }\n//#CLIENTSIDE\nfunction onActionClientSide() {}"})
 	player := NewPlayer(nil, server)
@@ -269,7 +260,6 @@ func TestTriggerActionServersideWeaponSendsTriggerClient(t *testing.T) {
 }
 
 func TestTriggerActionDuplicateServersideIsIgnored(t *testing.T) {
-	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
 	server := &Server{
 		logger:          NewLogger("", false),
 		settings:        NewSettings(),
@@ -278,8 +268,6 @@ func TestTriggerActionDuplicateServersideIsIgnored(t *testing.T) {
 		weapons:         make(map[string]*Weapon),
 		triggerCommands: make(map[string]func(*Player, []string) bool),
 	}
-	server.settings.Set("gs2vmhost", os.Args[0])
-	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
 	server.initTriggerCommands()
 	server.AddWeapon(&Weapon{name: "test", script: "function onActionServerSide() { triggerclient(\"weapon\", name, \"kek\"); }"})
 	player := NewPlayer(nil, server)
@@ -310,10 +298,7 @@ func TestTriggerActionDuplicateServersideIsIgnored(t *testing.T) {
 }
 
 func TestRunServerSideGS2ExportsPlayerContext(t *testing.T) {
-	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
 	server := &Server{logger: NewLogger("", false), settings: NewSettings(), flags: make(map[string]string)}
-	server.settings.Set("gs2vmhost", os.Args[0])
-	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
 	player := NewPlayer(nil, server)
 	player.accountName = "moondeath"
 
@@ -324,6 +309,58 @@ func TestRunServerSideGS2ExportsPlayerContext(t *testing.T) {
 	}
 	if len(result.output) != 1 || result.output[0] != "moondeath" {
 		t.Fatalf("runServerSideGS2ForPlayer output = %#v", result.output)
+	}
+}
+
+func TestRunServerSideGS2UsesNativeParamsArray(t *testing.T) {
+	server := &Server{logger: NewLogger("", false), settings: NewSettings(), flags: make(map[string]string)}
+	player := NewPlayer(nil, server)
+	player.accountName = "moondeath"
+
+	result := server.runServerSideGS2ForPlayer("weapon", "-gr_movement", "onActionServerside", `function onActionServerside() {
+		echo("test" SPC params[0] SPC player.account);
+	}`, player, "from clientside")
+
+	if result.err != "" {
+		t.Fatalf("runServerSideGS2ForPlayer err = %q", result.err)
+	}
+	if len(result.output) != 1 || result.output[0] != "test from clientside moondeath" {
+		t.Fatalf("runServerSideGS2ForPlayer output = %#v", result.output)
+	}
+}
+
+func TestServerSideGS2FindPlayerSetsClientFlagsAndSendsPM(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.settings.Set("serverside", "true")
+	server.initNPCServer()
+	server.weapons = make(map[string]*Weapon)
+	weapon := &Weapon{name: "-test", script: `function onActionServerside() {
+		temp.pl = findplayer("moondeath");
+		if (temp.pl != null) {
+			temp.pl.clientr.foo = "bar";
+			temp.pl.sendpm("hey there");
+		}
+	}`}
+	server.AddWeapon(weapon)
+	player := NewPlayer(nil, server)
+	player.id = 2
+	player.playerType = PLTYPE_CLIENT3
+	player.accountName = "moondeath"
+	player.character.nickName = "*moondeath"
+	player.queueOutgoing = true
+	player.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[player.id] = player
+
+	server.runServerSideWeaponEventForPlayer(weapon, "onActionServerside", player)
+
+	if got := player.GetFlag("clientr.foo"); got != "bar" {
+		t.Fatalf("clientr.foo = %q, want bar", got)
+	}
+	if !bytes.Contains(player.outQueue, []byte("clientr.foo=bar")) {
+		t.Fatalf("clientr flag packet missing from % X", player.outQueue)
+	}
+	if !bytes.Contains(player.outQueue, []byte(gtokenizeText("hey there"))) {
+		t.Fatalf("script PM missing from % X", player.outQueue)
 	}
 }
 
@@ -3012,7 +3049,7 @@ func TestGTokenizeTextRoundTripsConfigLines(t *testing.T) {
 func TestRCFileBrowserStartSendsTokenizedFoldersAndDirectory(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.settings.Set("name", "Orion-Go")
-	writeTestFile(t, server.config.GetBasePath(), "levels/test.nw", "level")
+	writeTestFile(t, server.config.GetBasePath(), "world/levels/test.nw", "level")
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"rw levels/*.nw"}
 
@@ -3027,14 +3064,14 @@ func TestRCFileBrowserStartSendsTokenizedFoldersAndDirectory(t *testing.T) {
 		t.Fatalf("dirlist packet missing terminator: % X", rc.outQueue)
 	}
 	dirListPayload := rc.outQueue[1:dirListEnd]
-	if string(dirListPayload) != "\"rw levels/*.nw\"" {
+	if string(dirListPayload) != "\"rw world/levels/*.nw\"" {
 		t.Fatalf("dirlist payload = %q", dirListPayload)
 	}
 	if !bytes.Contains(rc.outQueue, append([]byte{PLO_RC_FILEBROWSER_MESSAGE + 32}, []byte("Welcome to the File Browser for Orion-Go.\n")...)) {
 		t.Fatalf("file browser welcome missing or malformed: % X", rc.outQueue)
 	}
 
-	wantPrefix := append([]byte{PLO_RC_FILEBROWSER_DIR + 32, byte(len("levels/"))}, []byte("levels/")...)
+	wantPrefix := append([]byte{PLO_RC_FILEBROWSER_DIR + 32, byte(len("world/levels/")) + 32}, []byte("world/levels/")...)
 	dirIndex := bytes.Index(rc.outQueue, wantPrefix)
 	if dirIndex < 0 {
 		t.Fatalf("dir packet prefix missing from % X, want % X", rc.outQueue, wantPrefix)
@@ -3043,17 +3080,17 @@ func TestRCFileBrowserStartSendsTokenizedFoldersAndDirectory(t *testing.T) {
 	if !bytes.HasPrefix(dirPacket, wantPrefix) {
 		t.Fatalf("dir packet prefix = % X, want % X", dirPacket, wantPrefix)
 	}
-	entryStart := 1 + 1 + len("levels/")
+	entryStart := 1 + 1 + len("world/levels/")
 	if dirPacket[entryStart] != ' ' {
 		t.Fatalf("dir entry separator = %02X, want space in % X", dirPacket[entryStart], dirPacket)
 	}
-	entryLen := int(dirPacket[entryStart+1])
+	entryLen := int(dirPacket[entryStart+1] - 32)
 	entry := dirPacket[entryStart+2 : entryStart+2+entryLen]
-	if entry[0] != byte(len("test.nw")) || string(entry[1:1+len("test.nw")]) != "test.nw" {
+	if entry[0] != byte(len("test.nw"))+32 || string(entry[1:1+len("test.nw")]) != "test.nw" {
 		t.Fatalf("dir entry filename malformed: % X", entry)
 	}
 	rightsOffset := 1 + len("test.nw")
-	if entry[rightsOffset] != byte(len("rw")) || string(entry[rightsOffset+1:rightsOffset+1+len("rw")]) != "rw" {
+	if entry[rightsOffset] != byte(len("rw"))+32 || string(entry[rightsOffset+1:rightsOffset+1+len("rw")]) != "rw" {
 		t.Fatalf("dir entry rights malformed: % X", entry)
 	}
 	if len(entry) != rightsOffset+1+len("rw")+10 {
@@ -3068,20 +3105,59 @@ func TestRCFileBrowserRootListsFilesAndFolders(t *testing.T) {
 	writeTestFile(t, server.config.GetBasePath(), "world/levels/test.nw", "level")
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"rw *.nw", "rw *.txt", "rw levels/*.nw"}
-	rc.lastFolder = ""
+	rc.lastFolder = "world/"
 
 	rc.msgPLI_RC_FILEBROWSER_START([]byte{PLI_RC_FILEBROWSER_START})
 
 	if !bytes.Contains(rc.outQueue, []byte("onlinestartlocal.nw")) {
 		t.Fatalf("root file browser output missing root level: % X", rc.outQueue)
 	}
-	if !bytes.Contains(rc.outQueue, []byte("levels/")) {
+	if !bytes.Contains(rc.outQueue, []byte("world/levels/")) {
 		t.Fatalf("root file browser output missing child folder: % X", rc.outQueue)
+	}
+	if bytes.Contains(rc.outQueue, []byte(" levels/")) {
+		t.Fatalf("root directory packet exposed child folder as file entry: % X", rc.outQueue)
+	}
+}
+
+func TestRCFileBrowserHidesDotFilesAndUsesWorldFolders(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "world/shields/.empty", "")
+	writeTestFile(t, server.config.GetBasePath(), "world/shields/shield1.png", "shield")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw shields/*"}
+
+	rc.msgPLI_RC_FILEBROWSER_START([]byte{PLI_RC_FILEBROWSER_START})
+
+	if !bytes.Contains(rc.outQueue, []byte("\"rw world/shields/*\"")) {
+		t.Fatalf("dirlist did not expose shields under world: % X", rc.outQueue)
+	}
+	if bytes.Contains(rc.outQueue, []byte(".empty")) {
+		t.Fatalf("file browser exposed .empty placeholder: % X", rc.outQueue)
+	}
+	if !bytes.Contains(rc.outQueue, []byte("shield1.png")) {
+		t.Fatalf("file browser missing real shield file: % X", rc.outQueue)
+	}
+}
+
+func TestRCFileBrowserDoesNotListSubfoldersAsFiles(t *testing.T) {
+	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "world/global/heads/head0.png", "head")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw */*", "rw */*/*", "rw */*/*/*"}
+	rc.lastFolder = "world/global/"
+
+	rc.sendRCFileBrowserDir(rc.rcFolderMap())
+
+	if bytes.Contains(rc.outQueue, []byte("heads/")) {
+		t.Fatalf("file browser exposed subfolder as file entry: % X", rc.outQueue)
 	}
 }
 
 func TestRCFileBrowserWildcardFolderRightsExpandRealFolders(t *testing.T) {
 	server := newLoginTestServer(t)
+	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", "account")
+	writeTestFile(t, server.config.GetBasePath(), "world/onlinestartlocal.nw", "level")
 	writeTestFile(t, server.config.GetBasePath(), "world/levels/onlinestartlocal.nw", "level")
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"rw */*", "rw */*/*", "rw */*/*/*"}
@@ -3096,11 +3172,18 @@ func TestRCFileBrowserWildcardFolderRightsExpandRealFolders(t *testing.T) {
 	if bytes.Contains(rc.outQueue[:dirListEnd], []byte("*/")) {
 		t.Fatalf("file browser output exposed wildcard as folder: % X", rc.outQueue)
 	}
-	if !bytes.Contains(rc.outQueue, []byte("levels/")) {
-		t.Fatalf("file browser output missing real levels folder: % X", rc.outQueue)
+	rc.outQueue = rc.outQueue[:0]
+	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("world/")...))
+	if !bytes.Contains(rc.outQueue, []byte("onlinestartlocal.nw")) {
+		t.Fatalf("file browser output missing world root level through wildcard rights: % X", rc.outQueue)
 	}
 	rc.outQueue = rc.outQueue[:0]
-	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("levels/")...))
+	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("accounts/")...))
+	if !bytes.Contains(rc.outQueue, []byte("moondeath.txt")) {
+		t.Fatalf("file browser output missing account file through wildcard rights: % X", rc.outQueue)
+	}
+	rc.outQueue = rc.outQueue[:0]
+	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("world/levels/")...))
 	if !bytes.Contains(rc.outQueue, []byte("onlinestartlocal.nw")) {
 		t.Fatalf("file browser output missing level file through wildcard rights: % X", rc.outQueue)
 	}
@@ -3108,16 +3191,16 @@ func TestRCFileBrowserWildcardFolderRightsExpandRealFolders(t *testing.T) {
 
 func TestRCFileBrowserCDParsesRawFolderAndSendsDirectory(t *testing.T) {
 	server := newLoginTestServer(t)
-	writeTestFile(t, server.config.GetBasePath(), "levels/test.nw", "level")
+	writeTestFile(t, server.config.GetBasePath(), "world/levels/test.nw", "level")
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"rw levels/*.nw"}
 
-	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("levels/")...))
+	rc.msgPLI_RC_FILEBROWSER_CD(append([]byte{PLI_RC_FILEBROWSER_CD}, []byte("world/levels/")...))
 
-	if rc.lastFolder != "levels/" {
-		t.Fatalf("lastFolder = %q, want levels/", rc.lastFolder)
+	if rc.lastFolder != "world/levels/" {
+		t.Fatalf("lastFolder = %q, want world/levels/", rc.lastFolder)
 	}
-	if !bytes.Contains(rc.outQueue, append([]byte{PLO_RC_FILEBROWSER_DIR + 32, byte(len("levels/"))}, []byte("levels/")...)) {
+	if !bytes.Contains(rc.outQueue, append([]byte{PLO_RC_FILEBROWSER_DIR + 32, byte(len("world/levels/")) + 32}, []byte("world/levels/")...)) {
 		t.Fatalf("cd did not send directory packet: % X", rc.outQueue)
 	}
 }
@@ -3126,18 +3209,91 @@ func TestRCFileBrowserUploadParsesString8FilenameAndRawData(t *testing.T) {
 	server := newLoginTestServer(t)
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"rw levels/*.nw"}
-	rc.lastFolder = "levels/"
+	rc.lastFolder = "world/levels/"
 
-	packet := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("upload.nw"))}, []byte("upload.nw")...)
+	packet := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("upload.nw")) + 32}, []byte("upload.nw")...)
 	packet = append(packet, []byte("uploaded")...)
 	rc.msgPLI_RC_FILEBROWSER_UP(packet)
 
-	got, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "levels", "upload.nw"))
+	got, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "world", "levels", "upload.nw"))
 	if err != nil {
 		t.Fatalf("read uploaded file: %v", err)
 	}
 	if string(got) != "uploaded" {
 		t.Fatalf("uploaded file = %q", got)
+	}
+}
+
+func TestRCFileBrowserUploadBinaryPayloadKeepsEmbeddedNewlines(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.settings.Set("staff", "Admin")
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.conn = fakeConn{remote: fakeAddr("127.0.0.1:1234")}
+	rc.adminIp = "127.0.0.*"
+	rc.folderList = []string{"rw images/*"}
+	rc.lastFolder = "world/images/"
+
+	payload := []byte{0x89, 'P', 'N', 'G', '\n', 0x00, 0x01, '\n', 0xFF}
+	packet := append([]byte{byte(PLI_RC_FILEBROWSER_UP + 32), byte(len("logo.png")) + 32}, []byte("logo.png")...)
+	packet = append(packet, payload...)
+	packet = append(packet, '\n')
+	rc.handleDecompressedPackets(packet)
+
+	got, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "world", "images", "logo.png"))
+	if err != nil {
+		t.Fatalf("read uploaded binary file: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("uploaded binary = % X, want % X", got, payload)
+	}
+	if rc.invalidPackets != 0 {
+		t.Fatalf("invalidPackets = %d, want 0", rc.invalidPackets)
+	}
+}
+
+func TestRCFileBrowserUploadReloadsCachedLevel(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw levels/*.nw"}
+	rc.lastFolder = "world/levels/"
+	levelName := "world/levels/live.nw"
+	writeTestFile(t, server.config.GetBasePath(), levelName, "GLEVNW01\n")
+	level := NewLevel()
+	if !level.loadLevel(server, levelName) {
+		t.Fatalf("initial loadLevel failed")
+	}
+	server.AddLevel(level)
+
+	packet := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("live.nw")) + 32}, []byte("live.nw")...)
+	packet = append(packet, []byte("GLEVNW02\n")...)
+	rc.msgPLI_RC_FILEBROWSER_UP(packet)
+
+	if level.fileVersion != "GLEVNW02" {
+		t.Fatalf("level fileVersion = %q, want GLEVNW02", level.fileVersion)
+	}
+}
+
+func TestRCFileBrowserLargeUploadReloadsCachedLevel(t *testing.T) {
+	server := newLoginTestServer(t)
+	rc := newRCFileBrowserTestPlayer(server)
+	rc.folderList = []string{"rw levels/*.nw"}
+	rc.lastFolder = "world/levels/"
+	levelName := "world/levels/large.nw"
+	writeTestFile(t, server.config.GetBasePath(), levelName, "GLEVNW01\n")
+	level := NewLevel()
+	if !level.loadLevel(server, levelName) {
+		t.Fatalf("initial loadLevel failed")
+	}
+	server.AddLevel(level)
+
+	rc.msgPLI_RC_LARGEFILESTART(append([]byte{PLI_RC_LARGEFILESTART}, []byte("large.nw")...))
+	chunk := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("large.nw")) + 32}, []byte("large.nw")...)
+	chunk = append(chunk, []byte("GLEVNW02\n")...)
+	rc.msgPLI_RC_FILEBROWSER_UP(chunk)
+	rc.msgPLI_RC_LARGEFILEEND(append([]byte{PLI_RC_LARGEFILEEND}, []byte("large.nw")...))
+
+	if level.fileVersion != "GLEVNW02" {
+		t.Fatalf("level fileVersion = %q, want GLEVNW02", level.fileVersion)
 	}
 }
 
@@ -3153,15 +3309,22 @@ func TestRCFileBrowserListsAccountsThroughAccountFolderRight(t *testing.T) {
 	if !bytes.Contains(rc.outQueue, []byte("moondeath.txt")) {
 		t.Fatalf("accounts folder output missing account file: % X", rc.outQueue)
 	}
+	entryPrefix := []byte{' ', byte(1 + len("moondeath.txt") + 1 + len("rw") + 10 + 32), byte(len("moondeath.txt") + 32)}
+	entryPrefix = append(entryPrefix, []byte("moondeath.txt")...)
+	entryPrefix = append(entryPrefix, byte(len("rw")+32))
+	entryPrefix = append(entryPrefix, []byte("rw")...)
+	if !bytes.Contains(rc.outQueue, entryPrefix) {
+		t.Fatalf("accounts folder output has malformed account entry: % X want prefix % X", rc.outQueue, entryPrefix)
+	}
 }
 
 func TestRCFileBrowserUploadRequiresWriteRight(t *testing.T) {
 	server := newLoginTestServer(t)
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"r levels/*.nw"}
-	rc.lastFolder = "levels/"
+	rc.lastFolder = "world/levels/"
 
-	packet := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("upload.nw"))}, []byte("upload.nw")...)
+	packet := append([]byte{PLI_RC_FILEBROWSER_UP, byte(len("upload.nw")) + 32}, []byte("upload.nw")...)
 	packet = append(packet, []byte("uploaded")...)
 	rc.msgPLI_RC_FILEBROWSER_UP(packet)
 
@@ -3172,10 +3335,10 @@ func TestRCFileBrowserUploadRequiresWriteRight(t *testing.T) {
 
 func TestRCFileBrowserDownloadWrapsFilePacketInRawData(t *testing.T) {
 	server := newLoginTestServer(t)
-	writeTestFile(t, server.config.GetBasePath(), "levels/test.nw", "level")
+	writeTestFile(t, server.config.GetBasePath(), "world/levels/test.nw", "level")
 	rc := newRCFileBrowserTestPlayer(server)
 	rc.folderList = []string{"r levels/*.nw"}
-	rc.lastFolder = "levels/"
+	rc.lastFolder = "world/levels/"
 
 	rc.msgPLI_RC_FILEBROWSER_DOWN(append([]byte{PLI_RC_FILEBROWSER_DOWN}, []byte("test.nw")...))
 
@@ -3311,6 +3474,17 @@ func TestRCLoginAcceptsStaffAccountWithMatchingIPRange(t *testing.T) {
 	}
 }
 
+func TestRCLoginAcceptsStaffAccountWithAnyIPRange(t *testing.T) {
+	server := newRepoScratchLoginServer(t, "rc-auth-ip-any")
+	server.settings.Set("staff", "moondeath")
+	writeLoginAccount(t, server, "moondeath", "*.*.*.*", allLocalRights())
+	p := NewPlayer(fakeConn{remote: fakeAddr("149.120.108.16:1234")}, server)
+
+	if !p.handleLogin(buildLoginPacket(t, 6, 42, "G3D0311C", "moondeath", "pass", "win,test,6.037")) {
+		t.Fatalf("RC login rejected staff account with wildcard IP range")
+	}
+}
+
 func TestRCFileBrowserUsesFolderConfigFallbackAndRootWildcard(t *testing.T) {
 	server := newLoginTestServer(t)
 	writeTestFile(t, server.config.GetBasePath(), "config/foldersconfig.txt", ""+
@@ -3329,7 +3503,7 @@ func TestRCFileBrowserUsesFolderConfigFallbackAndRootWildcard(t *testing.T) {
 	if !bytes.Contains(rc.outQueue, []byte("start.nw")) {
 		t.Fatalf("file browser output missing root wildcard file: % X", rc.outQueue)
 	}
-	if !bytes.Contains(rc.outQueue, []byte("rw *.nw")) {
+	if !bytes.Contains(rc.outQueue, []byte("rw world/*.nw")) {
 		t.Fatalf("file browser dirlist missing derived root folder right: % X", rc.outQueue)
 	}
 }
@@ -3485,7 +3659,7 @@ func newRCFileBrowserTestPlayer(server *Server) *Player {
 	rc.accountName = "Admin"
 	rc.queueOutgoing = true
 	rc.encryption.SetGen(ENCRYPT_GEN_1)
-	rc.rcLargeFiles = make(map[string]string)
+	rc.rcLargeFiles = make(map[string][]byte)
 	return rc
 }
 
@@ -7923,6 +8097,7 @@ func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
 	server.weapons = map[string]*Weapon{"-gr_movement": weapon}
 	p := NewPlayer(nil, server)
 	p.queueOutgoing = true
+	p.versionId = 300
 	p.encryption.SetGen(ENCRYPT_GEN_1)
 
 	if !p.sendAccountWeapon("-gr_movement") {

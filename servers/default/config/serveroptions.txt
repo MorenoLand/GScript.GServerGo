@@ -6,7 +6,7 @@ startx = 30
 starty = 30.5
 
 # Enable high-level debug output.
-debugmode = true
+debugmode = false
 
 # Enable extremely verbose packet byte/encryption/compression dumps.
 # This is useful while tracing protocol framing, but noisy during normal testing.
@@ -14,8 +14,6 @@ packetdebugmode = false
 
 # External GS2 compiler used by NC weapon/class saves for clientside syntax feedback and bytecode output.
 gs2compiler = tools\gs2compiler\gs2compiler.exe
-gs2vmhost = tools\gs2vmhost\bin\Gs2VmHost.exe
-gs2vmhostargs =
 
 # Specifies where players go when they say "unstick me".
 unstickmelevel = onlinestartlocal.nw

@@ -2075,7 +2075,7 @@ type Player struct {
 	lastServersideTrigger                                                     time.Time
 	lastServersideTriggerAction                                               string
 	cachedLevels                                                              []*CachedLevel
-	rcLargeFiles                                                              map[string]string
+	rcLargeFiles                                                              map[string][]byte
 	singleplayerLevels                                                        map[string]*Level
 	channelList                                                               map[string]bool
 	knownFiles                                                                map[string]bool
@@ -2107,7 +2107,7 @@ type CachedLevel struct {
 
 func (p *Player) SendPacket(data []byte) { p.sendPacket(append(data, '\n')) }
 func NewPlayer(conn net.Conn, s *Server) *Player {
-	p := &Player{conn: conn, server: s, recvBuffer: make([]byte, 0, 8192), encryption: *NewEncryption(), playerType: PLTYPE_AWAIT, cachedLevels: make([]*CachedLevel, 0), rcLargeFiles: make(map[string]string), singleplayerLevels: make(map[string]*Level), channelList: make(map[string]bool), knownFiles: make(map[string]bool), externalPlayers: make(map[uint16]*Player), externalPlayerIdGen: EXTERNALPLAYERID_INIT, firstLevel: true, packetCount: 0, invalidPackets: 0}
+	p := &Player{conn: conn, server: s, recvBuffer: make([]byte, 0, 8192), encryption: *NewEncryption(), playerType: PLTYPE_AWAIT, cachedLevels: make([]*CachedLevel, 0), rcLargeFiles: make(map[string][]byte), singleplayerLevels: make(map[string]*Level), channelList: make(map[string]bool), knownFiles: make(map[string]bool), externalPlayers: make(map[uint16]*Player), externalPlayerIdGen: EXTERNALPLAYERID_INIT, firstLevel: true, packetCount: 0, invalidPackets: 0}
 	p.flagList = make(map[string]string)
 	p.folderRights = *NewFilePermissions()
 	p.setServer(s)
@@ -3070,8 +3070,9 @@ func (p *Player) handleLogin(packet []byte) bool {
 	if clientType&PLTYPE_ANYCONTROL != 0 && !p.canLoginControl() {
 		p.server.logger.Warning("[Disconnect] %s attempted RC/NC login without rights or matching IP", account)
 		buf := NewBuffer()
-		buf.WriteByte(PLO_DISCMESSAGE).Write([]byte("You do not have RC rights."))
+		buf.WriteByte(PLO_DISCMESSAGE).Write([]byte("You do not have RC/NC rights or your IP range does not match."))
 		p.send(buf)
+		p.sendCompress(true)
 		return false
 	}
 	if clientType&PLTYPE_ANYRC != 0 {
@@ -3229,6 +3230,16 @@ func debugHexPreview(data []byte) string {
 
 func (p *Player) handleDecompressedPackets(data []byte) {
 	for len(data) > 0 {
+		if isBinaryTailIncomingPacket(data[0]) {
+			packet := data
+			if len(packet) > 0 && packet[len(packet)-1] == '\n' {
+				packet = packet[:len(packet)-1]
+			}
+			if len(packet) > 0 {
+				p.handlePacket(packet)
+			}
+			return
+		}
 		newline := bytes.IndexByte(data, '\n')
 		if newline == -1 {
 			if len(data) > 0 {
@@ -3242,6 +3253,11 @@ func (p *Player) handleDecompressedPackets(data []byte) {
 			p.handlePacket(packet)
 		}
 	}
+}
+
+func isBinaryTailIncomingPacket(rawPacketId byte) bool {
+	packetId := int(NewBufferFromBytes([]byte{rawPacketId}).ReadGChar())
+	return packetId == PLI_RC_FILEBROWSER_UP
 }
 
 func (p *Player) sendPacket(packet []byte) {
@@ -7697,12 +7713,12 @@ func (sl *ServerList) connectServer() bool {
 	buf.WriteString8Encoded(ip)
 	buf.WriteString8Encoded(port)
 	buf.WriteString8Encoded(localip)
-	sl.server.logger.Debug("[LISTSERVER] NEWSERVER packet: name=%d desc=%d lang=%d ver=%d url=%d ip=%d port=%d localip=%d", len(name), len(desc), len(language), len(APP_VERSION), len(url), len(ip), len(port), len(localip))
+	sl.server.logger.PacketDebug("[LISTSERVER] NEWSERVER packet: name=%d desc=%d lang=%d ver=%d url=%d ip=%d port=%d localip=%d", len(name), len(desc), len(language), len(APP_VERSION), len(url), len(ip), len(port), len(localip))
 	var hexData string
 	for i := 0; i < 30 && i < buf.Len(); i++ {
 		hexData += fmt.Sprintf("%02X ", buf.Bytes()[i])
 	}
-	sl.server.logger.Debug("[LISTSERVER] NEWSERVER data: %s", hexData)
+	sl.server.logger.PacketDebug("[LISTSERVER] NEWSERVER data: %s", hexData)
 	sl.sendPacket(buf.Bytes())
 	// Packet 4: SVO_SERVERHQLEVEL
 	buf = NewBuffer()
@@ -8096,7 +8112,7 @@ func (sl *ServerList) sendPacket(packet []byte) {
 				break
 			}
 		}
-		sl.server.logger.Debug("[LISTSERVER] GEN_1 Sending %d bytes: %s", len(packet), hexOut)
+		sl.server.logger.PacketDebug("[LISTSERVER] GEN_1 Sending %d bytes: %s", len(packet), hexOut)
 		sl.sendQueue <- packet
 	case ENCRYPT_GEN_2:
 		// Zlib compress + 2-byte length prefix
@@ -8121,7 +8137,7 @@ func (sl *ServerList) sendPacket(packet []byte) {
 				break
 			}
 		}
-		sl.server.logger.Debug("[LISTSERVER] GEN_2 Sending %d bytes (compressed from %d): %s", len(finalPacket), len(packet), hexOut)
+		sl.server.logger.PacketDebug("[LISTSERVER] GEN_2 Sending %d bytes (compressed from %d): %s", len(finalPacket), len(packet), hexOut)
 		sl.sendQueue <- finalPacket
 	default:
 		sl.sendQueue <- packet
@@ -8138,7 +8154,7 @@ func (sl *ServerList) sendPlayers() {
 	sl.sendPacket(buf.Bytes())
 	for _, player := range sl.server.players {
 		if isListserverPlayer(player) {
-			sl.server.logger.Debug("[LISTSERVER] Sending player to listserver: id=%d type=%d account=%s nickname=%s level=%s x=%d y=%d", player.id, player.playerType, player.accountName, player.character.nickName, player.levelName, int(player.x), int(player.y))
+			sl.server.logger.PacketDebug("[LISTSERVER] Sending player to listserver: id=%d type=%d account=%s nickname=%s level=%s x=%d y=%d", player.id, player.playerType, player.accountName, player.character.nickName, player.levelName, int(player.x), int(player.y))
 			sl.sendPlayerAdd(player)
 		}
 	}
@@ -8233,7 +8249,7 @@ func (sl *ServerList) sendPlayerAdd(player *Player) {
 		buf.Write(player.getProp(propId))
 	}
 	packetBytes := buf.Bytes()
-	sl.server.logger.Info("[LISTSERVER] PLYRADD packet (%d bytes): %v", len(packetBytes), packetBytes)
+	sl.server.logger.PacketDebug("[LISTSERVER] PLYRADD packet (%d bytes): %v", len(packetBytes), packetBytes)
 	sl.sendPacket(packetBytes)
 }
 func (sl *ServerList) DeletePlayer(player *Player) {

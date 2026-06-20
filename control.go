@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -1483,6 +1484,11 @@ func (p *Player) rcFolderMap() map[string]string {
 				folderPath = ""
 			}
 		}
+		if folderPath == "" && strings.ContainsAny(wild, "*?") {
+			folderPath = "world/"
+		} else {
+			folderPath = rcFileBrowserPath(folderPath)
+		}
 		for _, realFolder := range p.expandRCFolderPath(folderPath) {
 			folderMap[realFolder] += rights + ":" + wild + "\n"
 		}
@@ -1514,7 +1520,7 @@ func (p *Player) rcFileBrowserFolderList(folderMap map[string]string) string {
 }
 
 func (p *Player) rcFileRights(filePath string) string {
-	filePath = filepath.ToSlash(strings.TrimLeft(strings.TrimSpace(filePath), "/"))
+	filePath = rcFileBrowserPath(filePath)
 	if filePath == "" || strings.Contains(filePath, "..") || strings.Contains(filePath, ":") {
 		return ""
 	}
@@ -1526,11 +1532,11 @@ func (p *Player) rcFileRights(filePath string) string {
 			rights = strings.ToLower(strings.TrimSpace(parts[0]))
 			pattern = strings.TrimSpace(parts[1])
 		}
-		pattern = filepath.ToSlash(strings.TrimLeft(strings.TrimSpace(pattern), "/"))
+		pattern = rcFileBrowserPattern(pattern)
 		if pattern == "" || strings.Contains(pattern, "..") || strings.Contains(pattern, ":") {
 			continue
 		}
-		matched, err := filepath.Match(pattern, filePath)
+		matched, err := path.Match(pattern, filePath)
 		if err != nil || !matched {
 			continue
 		}
@@ -1548,6 +1554,43 @@ func (p *Player) rcFileRights(filePath string) string {
 		rights += "w"
 	}
 	return rights
+}
+
+func rcFileBrowserPath(filePath string) string {
+	filePath = filepath.ToSlash(strings.TrimLeft(strings.TrimSpace(filePath), "/"))
+	if filePath == "" || strings.Contains(filePath, "..") || strings.Contains(filePath, ":") {
+		return filePath
+	}
+	root := filePath
+	if idx := strings.Index(root, "/"); idx >= 0 {
+		root = root[:idx]
+	}
+	if root == "accounts" || root == "config" || root == "logs" || root == "world" {
+		return filePath
+	}
+	if strings.ContainsAny(root, "*?") {
+		return filePath
+	}
+	return "world/" + filePath
+}
+
+func rcFileBrowserPattern(pattern string) string {
+	pattern = filepath.ToSlash(strings.TrimLeft(strings.TrimSpace(pattern), "/"))
+	if pattern == "" || strings.Contains(pattern, "..") || strings.Contains(pattern, ":") {
+		return pattern
+	}
+	root := pattern
+	hasSlash := strings.Contains(pattern, "/")
+	if idx := strings.Index(root, "/"); idx >= 0 {
+		root = root[:idx]
+	}
+	if root == "accounts" || root == "config" || root == "logs" || root == "world" {
+		return pattern
+	}
+	if hasSlash && strings.ContainsAny(root, "*?") {
+		return pattern
+	}
+	return "world/" + pattern
 }
 
 func (p *Player) rcFileHasRight(filePath string, right rune) bool {
@@ -1578,7 +1621,7 @@ func (p *Player) expandRCFolderPath(folderPath string) []string {
 			out = append(out, prefix)
 			return
 		}
-		dirs, err := p.server.config.ListDirs(prefix)
+		dirs, err := p.rcFileBrowserListDirs(prefix)
 		if err != nil {
 			return
 		}
@@ -1589,8 +1632,31 @@ func (p *Player) expandRCFolderPath(folderPath string) []string {
 			}
 		}
 	}
-	walk("", 0)
+	startPrefix := ""
+	startIndex := 0
+	if len(parts) > 0 && parts[0] == "world" {
+		startPrefix = "world/"
+		startIndex = 1
+	}
+	walk(startPrefix, startIndex)
 	return out
+}
+
+func (p *Player) rcFileBrowserListDirs(prefix string) ([]string, error) {
+	if prefix != "" {
+		return p.server.config.ListDirs(prefix)
+	}
+	entries, err := os.ReadDir(p.server.config.GetBasePath())
+	if err != nil {
+		return nil, err
+	}
+	dirs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+	return dirs, nil
 }
 
 func (p *Player) sendRCFileBrowserDir(folderMap map[string]string) {
@@ -1599,43 +1665,14 @@ func (p *Player) sendRCFileBrowserDir(folderMap map[string]string) {
 		p.server.logger.Error("Failed to list files in %s: %v", p.lastFolder, err)
 		return
 	}
-	dirs, _ := p.server.config.ListDirs(p.lastFolder)
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RC_FILEBROWSER_DIR)
-	buf.WriteByte(byte(len(p.lastFolder)))
+	buf.WriteGChar(byte(len(p.lastFolder)))
 	buf.Write([]byte(p.lastFolder))
-	for _, dir := range dirs {
-		if strings.HasPrefix(dir, ".") {
-			continue
-		}
-		dirName := dir + "/"
-		childFolder := p.lastFolder + dirName
-		childRights := folderMap[childFolder]
-		if childRights == "" {
-			continue
-		}
-		rights := "r"
-		if first, _, ok := strings.Cut(childRights, ":"); ok && first != "" {
-			rights = first
-		}
-		filePath := childFolder
-		fileInfo, err := p.server.config.FileInfo(filePath)
-		if err != nil {
-			continue
-		}
-		entry := NewBuffer()
-		entry.WriteByte(byte(len(dirName)))
-		entry.Write([]byte(dirName))
-		entry.WriteByte(byte(len(rights)))
-		entry.Write([]byte(rights))
-		entry.WriteGInt5(0)
-		entry.WriteGInt5(uint64(fileInfo.ModTime().Unix()))
-		entryData := entry.Bytes()
-		buf.WriteByte(' ')
-		buf.WriteByte(byte(len(entryData)))
-		buf.Write(entryData)
-	}
 	for _, file := range files {
+		if strings.HasPrefix(file, ".") {
+			continue
+		}
 		filePath := p.lastFolder + file
 		rights := p.rcFileRights(filePath)
 		if !strings.Contains(rights, "r") {
@@ -1646,15 +1683,15 @@ func (p *Player) sendRCFileBrowserDir(folderMap map[string]string) {
 			continue
 		}
 		entry := NewBuffer()
-		entry.WriteByte(byte(len(file)))
+		entry.WriteGChar(byte(len(file)))
 		entry.Write([]byte(file))
-		entry.WriteByte(byte(len(rights)))
+		entry.WriteGChar(byte(len(rights)))
 		entry.Write([]byte(rights))
 		entry.WriteGInt5(uint64(fileInfo.Size()))
 		entry.WriteGInt5(uint64(fileInfo.ModTime().Unix()))
 		entryData := entry.Bytes()
 		buf.WriteByte(' ')
-		buf.WriteByte(byte(len(entryData)))
+		buf.WriteGChar(byte(len(entryData)))
 		buf.Write(entryData)
 	}
 	p.send(buf)
@@ -1751,7 +1788,7 @@ func (p *Player) msgPLI_RC_FILEBROWSER_UP(packet []byte) bool {
 		return true
 	}
 	buf := NewBufferFromBytes(packet[1:])
-	nameLen := int(buf.ReadByte())
+	nameLen := int(buf.ReadGChar())
 	fileName := string(buf.ReadBytes(nameLen))
 	filePath := p.lastFolder + fileName
 	if !p.rcFileHasRight(filePath, 'w') {
@@ -1788,8 +1825,9 @@ func (p *Player) msgPLI_RC_FILEBROWSER_UP(packet []byte) bool {
 		}
 		p.server.logger.Info("%s uploaded file %s", p.accountName, fileName)
 		p.send(fileBrowserMessagePacket("Uploaded file " + fileName))
+		p.updateUploadedFile(p.lastFolder, fileName)
 	} else {
-		p.rcLargeFiles[fileName] += string(fileData)
+		p.rcLargeFiles[fileName] = append(p.rcLargeFiles[fileName], fileData...)
 	}
 	return true
 }
@@ -1927,7 +1965,7 @@ func (p *Player) msgPLI_RC_LARGEFILESTART(packet []byte) bool {
 		p.send(fileBrowserMessagePacket("Insufficient rights to upload " + p.lastFolder + fileName))
 		return true
 	}
-	p.rcLargeFiles[fileName] = ""
+	p.rcLargeFiles[fileName] = nil
 	return true
 }
 func (p *Player) msgPLI_RC_LARGEFILEEND(packet []byte) bool {
@@ -1948,14 +1986,38 @@ func (p *Player) msgPLI_RC_LARGEFILEEND(packet []byte) bool {
 	if !exists {
 		return true
 	}
-	if err := p.server.config.SaveFile(filePath, []byte(fileData)); err != nil {
+	if err := p.server.config.SaveFile(filePath, fileData); err != nil {
 		p.server.logger.Error("Failed to save large file %s: %v", filePath, err)
 		return true
 	}
 	delete(p.rcLargeFiles, fileName)
+	p.updateUploadedFile(p.lastFolder, fileName)
 	p.server.logger.Info("%s uploaded large file %s", p.accountName, fileName)
 	p.send(fileBrowserMessagePacket("Uploaded large file " + fileName))
 	return true
+}
+
+func (p *Player) updateUploadedFile(dir, fileName string) {
+	if p == nil || p.server == nil {
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(fileName))
+	if ext != ".nw" && ext != ".graal" && ext != ".zelda" {
+		return
+	}
+	fullPath := filepath.ToSlash(dir + fileName)
+	baseName := filepath.Base(fullPath)
+	candidates := []string{fullPath, strings.TrimPrefix(fullPath, "world/levels/"), baseName, cleanLevelName(fullPath), cleanLevelName(strings.TrimPrefix(fullPath, "world/levels/")), cleanLevelName(baseName)}
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if level := p.server.GetLevel(candidate); level != nil {
+			level.reload(p.server)
+		}
+	}
 }
 func (p *Player) msgPLI_RC_FOLDERDELETE(packet []byte) bool {
 	folder := ""
