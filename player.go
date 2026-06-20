@@ -12,9 +12,14 @@ var defaultClientFilePatterns = []string{
 	"carried.gani", "carry.gani", "carrystill.gani", "carrypeople.gani", "dead.gani", "def.gani", "ghostani.gani", "grab.gani", "gralats.gani", "hatoff.gani", "haton.gani", "hidden.gani", "hiddenstill.gani", "hurt.gani", "idle.gani", "kick.gani", "lava.gani", "lift.gani", "maps1.gani", "maps2.gani", "maps3.gani", "pull.gani", "push.gani", "ride.gani", "rideeat.gani", "ridefire.gani", "ridehurt.gani", "ridejump.gani", "ridestill.gani", "ridesword.gani", "shoot.gani", "sit.gani", "skip.gani", "sleep.gani", "spin.gani", "swim.gani", "sword.gani", "walk.gani", "walkslow.gani",
 	"sword?.png", "sword?.gif",
 	"shield?.png", "shield?.gif",
+	"head*.png", "head*.gif",
 	"body.png", "body2.png", "body3.png",
+	"w*.png", "w*.gif",
+	"plisticon*.png", "plisticon*.gif",
+	"emoticon*.png", "emoticon*.gif", "emoticon*.mng",
+	"-.gif",
 	"arrow.wav", "arrowon.wav", "axe.wav", "bomb.wav", "chest.wav", "compudead.wav", "crush.wav", "dead.wav", "extra.wav", "fire.wav", "frog.wav", "frog2.wav", "goal.wav", "horse.wav", "horse2.wav", "item.wav", "item2.wav", "jump.wav", "lift.wav", "lift2.wav", "nextpage.wav", "put.wav", "sign.wav", "steps.wav", "steps2.wav", "stonemove.wav", "sword.wav", "swordon.wav", "thunder.wav", "water.wav",
-	"pics1.png",
+	"pics1.png", "sprites.png", "basepackage.gupd", "tempsitcbd.ttf", "arial.ttf",
 }
 
 func isDefaultClientFile(fileName string) bool {

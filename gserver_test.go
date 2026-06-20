@@ -7256,42 +7256,77 @@ func TestUpdateFileRequestSendsFileWhenModTimeDiffers(t *testing.T) {
 }
 
 func TestUpdateFileDefaultClientAssetReturnsUpToDate(t *testing.T) {
+	for _, fileName := range []string{"walk.gani", "head0.png", "wbomb1.png", "plisticoneating.png", "sprites.png", "basepackage.gupd", "tempsitcbd.ttf"} {
+		serverConn, clientConn := net.Pipe()
+		p := &Player{
+			conn:       serverConn,
+			server:     &Server{logger: NewLogger("", false), config: NewFileSystem(t.TempDir())},
+			encryption: *NewEncryption(),
+			versionId:  222,
+		}
+		p.encryption.SetGen(ENCRYPT_GEN_1)
+
+		request := NewBuffer()
+		request.WriteByte(PLI_UPDATEFILE)
+		request.WriteGInt5(0)
+		request.Write([]byte(fileName))
+
+		want := append([]byte{PLO_FILEUPTODATE + 32}, []byte(fileName)...)
+		want = append(want, '\n')
+
+		done := make(chan struct{}, 1)
+		go func() {
+			p.msgPLI_UPDATEFILE(request.Bytes())
+			done <- struct{}{}
+		}()
+
+		clientConn.SetReadDeadline(time.Now().Add(time.Second))
+		got := make([]byte, len(want))
+		if _, err := io.ReadFull(clientConn, got); err != nil {
+			t.Fatalf("read default asset update response for %s: %v", fileName, err)
+		}
+		<-done
+		serverConn.Close()
+		clientConn.Close()
+
+		if string(got) != string(want) {
+			t.Fatalf("default asset update response for %s = % X, want % X", fileName, got, want)
+		}
+	}
+}
+
+func TestWantFileDefaultClientAssetReturnsUpToDate(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	fileName := "walk.gani"
+	fileName := "-.gif"
 	p := &Player{
 		conn:       serverConn,
 		server:     &Server{logger: NewLogger("", false), config: NewFileSystem(t.TempDir())},
 		encryption: *NewEncryption(),
-		versionId:  222,
 	}
 	p.encryption.SetGen(ENCRYPT_GEN_1)
 
-	request := NewBuffer()
-	request.WriteByte(PLI_UPDATEFILE)
-	request.WriteGInt5(0)
-	request.Write([]byte(fileName))
-
+	request := append([]byte{PLI_WANTFILE}, []byte(fileName)...)
 	want := append([]byte{PLO_FILEUPTODATE + 32}, []byte(fileName)...)
 	want = append(want, '\n')
 
 	done := make(chan struct{}, 1)
 	go func() {
-		p.msgPLI_UPDATEFILE(request.Bytes())
+		p.msgPLI_WANTFILE(request)
 		done <- struct{}{}
 	}()
 
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))
 	got := make([]byte, len(want))
 	if _, err := io.ReadFull(clientConn, got); err != nil {
-		t.Fatalf("read default asset update response: %v", err)
+		t.Fatalf("read default wantfile response: %v", err)
 	}
 	<-done
 
 	if string(got) != string(want) {
-		t.Fatalf("default asset update response = % X, want % X", got, want)
+		t.Fatalf("default wantfile response = % X, want % X", got, want)
 	}
 }
 

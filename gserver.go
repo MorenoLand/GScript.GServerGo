@@ -5151,6 +5151,10 @@ func (p *Player) msgPLI_WANTFILE(packet []byte) bool {
 	if len(packet) > 1 {
 		fileName := string(packet[1:])
 		p.server.logger.Debug("WANTFILE: %s", fileName)
+		if isDefaultClientFile(fileName) {
+			p.sendPLO_FILEUPTODATE(fileName)
+			return true
+		}
 		p.sendFile(fileName)
 	}
 	return true
