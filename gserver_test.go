@@ -163,7 +163,7 @@ func TestGS2VMHostHelperProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	if strings.Contains(string(data), "triggerclient") {
-		fmt.Fprintln(os.Stdout, "TRIGGERCLIENT\tweapon\ttest\tkek")
+		fmt.Fprintln(os.Stdout, "TRIGGERCLIENT\ttest\tkek")
 		os.Exit(0)
 	}
 	if strings.Contains(string(data), "serverr.poopybutthole") {
@@ -178,6 +178,15 @@ func TestGS2VMHostHelperProcess(t *testing.T) {
 			_ = json.Unmarshal(decoded, &options)
 		}
 		fmt.Printf("ECHO\t%s:%s\n", flags["serverr.poopybutthole"], options["staff"])
+		os.Exit(0)
+	}
+	if strings.Contains(string(data), "player.account") {
+		player := map[string]string{}
+		if raw := os.Getenv("GS2_PLAYER"); raw != "" {
+			decoded, _ := base64.StdEncoding.DecodeString(raw)
+			_ = json.Unmarshal(decoded, &player)
+		}
+		fmt.Printf("ECHO\t%s\n", player["account"])
 		os.Exit(0)
 	}
 	fmt.Printf("ECHO\t%s:%s:%s:%s\n", os.Args[len(os.Args)-3], os.Args[len(os.Args)-2], os.Args[len(os.Args)-1], strings.TrimSpace(string(data)))
@@ -253,9 +262,80 @@ func TestTriggerActionServersideWeaponSendsTriggerClient(t *testing.T) {
 		t.Fatalf("msgPLI_TRIGGERACTION returned false")
 	}
 	want := NewBuffer()
-	want.WriteByte(PLO_TRIGGERACTION + 32).WriteGShort(0).WriteGInt(0).WriteGChar(0).WriteGChar(0).Write([]byte("clientside,weapon,test,kek"))
+	want.WriteByte(PLO_TRIGGERACTION + 32).WriteGShort(0).WriteGInt(0).WriteGChar(0).WriteGChar(0).Write([]byte("clientside,test,kek"))
 	if !bytes.Contains(player.outQueue, want.Bytes()) {
 		t.Fatalf("triggerclient packet missing: % X want % X", player.outQueue, want.Bytes())
+	}
+}
+
+func TestTriggerActionDuplicateServersideIsIgnored(t *testing.T) {
+	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
+	server := &Server{
+		logger:          NewLogger("", false),
+		settings:        NewSettings(),
+		players:         make(map[uint16]*Player),
+		levels:          make(map[string]*Level),
+		weapons:         make(map[string]*Weapon),
+		triggerCommands: make(map[string]func(*Player, []string) bool),
+	}
+	server.settings.Set("gs2vmhost", os.Args[0])
+	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
+	server.initTriggerCommands()
+	server.AddWeapon(&Weapon{name: "test", script: "function onActionServerSide() { triggerclient(\"weapon\", name, \"kek\"); }"})
+	player := NewPlayer(nil, server)
+	player.id = 4
+	player.playerType = PLTYPE_CLIENT3
+	player.accountName = "pc:763"
+	player.queueOutgoing = true
+	player.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[player.id] = player
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_TRIGGERACTION)
+	packet.WriteGInt(0)
+	packet.WriteGChar(0)
+	packet.WriteGChar(0)
+	packet.Write([]byte("serverside,test,from clientside"))
+
+	if !player.msgPLI_TRIGGERACTION(packet.Bytes()) {
+		t.Fatalf("first msgPLI_TRIGGERACTION returned false")
+	}
+	firstLen := len(player.outQueue)
+	if !player.msgPLI_TRIGGERACTION(packet.Bytes()) {
+		t.Fatalf("second msgPLI_TRIGGERACTION returned false")
+	}
+	if len(player.outQueue) != firstLen {
+		t.Fatalf("duplicate serverside trigger wrote %d extra bytes", len(player.outQueue)-firstLen)
+	}
+}
+
+func TestRunServerSideGS2ExportsPlayerContext(t *testing.T) {
+	t.Setenv("GO_WANT_GS2VM_HELPER_PROCESS", "1")
+	server := &Server{logger: NewLogger("", false), settings: NewSettings(), flags: make(map[string]string)}
+	server.settings.Set("gs2vmhost", os.Args[0])
+	server.settings.Set("gs2vmhostargs", "-test.run=TestGS2VMHostHelperProcess --")
+	player := NewPlayer(nil, server)
+	player.accountName = "moondeath"
+
+	result := server.runServerSideGS2ForPlayer("weapon", "test", "onCreated", "function onCreated(){ echo(player.account); }", player)
+
+	if result.err != "" {
+		t.Fatalf("runServerSideGS2ForPlayer err = %q", result.err)
+	}
+	if len(result.output) != 1 || result.output[0] != "moondeath" {
+		t.Fatalf("runServerSideGS2ForPlayer output = %#v", result.output)
+	}
+}
+
+func TestSnapshotGS2PlayerUsesPCIDForGuestAccount(t *testing.T) {
+	player := &Player{}
+	player.accountName = "guest"
+	player.deviceId = 315057
+
+	got := snapshotGS2Player(player)
+
+	if got["account"] != "pc:315057" {
+		t.Fatalf("account = %q, want pc:315057", got["account"])
 	}
 }
 
@@ -7664,6 +7744,46 @@ func TestSendWeaponFormatsClientsideScriptFromMarker(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("weapon packet = % X, want % X", got, want)
+	}
+}
+
+func TestSendWeaponSendsBytecodeWithoutSourceForModernClients(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{
+		conn:       serverConn,
+		server:     &Server{logger: NewLogger("", false)},
+		encryption: *NewEncryption(),
+		versionId:  300,
+	}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+
+	weapon := &Weapon{name: "-gr_movement", image: "wbomb1.png", script: "//#CLIENTSIDE\nfunction onCreated(){ triggerServer(\"gui\", name, \"x\"); }", bytecode: []byte{0x01, 0x02, 0x03}}
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendWeapon(weapon)
+		done <- struct{}{}
+	}()
+
+	add := []byte{PLO_NPCWEAPONADD + 32, byte(len(weapon.name)) + 32}
+	add = append(add, []byte(weapon.name)...)
+	add = append(add, NPCPROP_IMAGE+32, byte(len(weapon.image))+32)
+	add = append(add, []byte(weapon.image)...)
+	add = append(add, '\n')
+	raw := []byte{PLO_RAWDATA + 32, 0x20, 0x20, 0x24, '\n', PLO_NPCWEAPONSCRIPT + 32, 0x01, 0x02, 0x03}
+	want := append(add, raw...)
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read weapon bytecode packets: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("weapon bytecode packets = % X, want % X", got, want)
 	}
 }
 

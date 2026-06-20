@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,10 @@ type gs2VMResult struct {
 }
 
 func (s *Server) runServerSideGS2(scriptType, scriptName, eventName, script string, eventArgs ...string) gs2VMResult {
+	return s.runServerSideGS2WithEnv(scriptType, scriptName, eventName, script, nil, eventArgs...)
+}
+
+func (s *Server) runServerSideGS2WithEnv(scriptType, scriptName, eventName, script string, extraEnv map[string]string, eventArgs ...string) gs2VMResult {
 	src := serversideGS2(script)
 	if strings.TrimSpace(src) == "" {
 		return gs2VMResult{}
@@ -36,6 +41,9 @@ func (s *Server) runServerSideGS2(scriptType, scriptName, eventName, script stri
 	cmd.Stdin = strings.NewReader(src)
 	cmd.Env = append(os.Environ(), "GS2_SCRIPT_TYPE="+scriptType, "GS2_SCRIPT_NAME="+scriptName, "GS2_SCRIPT_EVENT="+eventName)
 	cmd.Env = append(cmd.Env, "GS2_SERVER_FLAGS="+encodeGS2VMMap(s.snapshotServerFlags()), "GS2_SERVER_OPTIONS="+encodeGS2VMMap(s.snapshotServerOptions()))
+	for key, value := range extraEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -61,7 +69,7 @@ func (s *Server) runServerSideGS2(scriptType, scriptName, eventName, script stri
 			lines = append(lines, payload)
 		} else if payload, ok := strings.CutPrefix(line, "TRIGGERCLIENT\t"); ok {
 			parts := strings.Split(payload, "\t")
-			if len(parts) >= 2 && (parts[0] == "gui" || parts[0] == "weapon") {
+			if len(parts) >= 1 && strings.TrimSpace(parts[0]) != "" {
 				clientTriggers = append(clientTriggers, "clientside,"+strings.Join(parts, ","))
 			}
 		} else if payload, ok := strings.CutPrefix(line, "ERROR\t"); ok {
@@ -71,6 +79,22 @@ func (s *Server) runServerSideGS2(scriptType, scriptName, eventName, script stri
 		}
 	}
 	return gs2VMResult{output: lines, clientTriggers: clientTriggers}
+}
+
+func snapshotGS2Player(player *Player) map[string]string {
+	out := make(map[string]string)
+	if player == nil {
+		return out
+	}
+	account := player.accountName
+	if player.deviceId > 0 && (account == "" || strings.EqualFold(account, "guest")) {
+		account = "pc:" + strconv.FormatInt(player.deviceId, 10)
+	}
+	out["account"] = account
+	out["nick"] = player.character.nickName
+	out["nickname"] = player.character.nickName
+	out["level"] = player.levelName
+	return out
 }
 
 func encodeGS2VMMap(values map[string]string) string {
@@ -125,7 +149,7 @@ func (s *Server) runServerSideWeaponEventForPlayer(weapon *Weapon, eventName str
 	if s == nil || weapon == nil || weapon.script == "" {
 		return
 	}
-	result := s.runServerSideGS2("weapon", weapon.name, eventName, weapon.script, eventArgs...)
+	result := s.runServerSideGS2ForPlayer("weapon", weapon.name, eventName, weapon.script, player, eventArgs...)
 	if result.err != "" {
 		s.sendToNC(fmt.Sprintf("GS2 VM error for Weapon %s: %s", weapon.name, result.err))
 		return
@@ -139,4 +163,9 @@ func (s *Server) runServerSideWeaponEventForPlayer(weapon *Weapon, eventName str
 		s.logger.Info("[GS2:%s] %s", weapon.name, line)
 		s.sendToNC(line)
 	}
+}
+
+func (s *Server) runServerSideGS2ForPlayer(scriptType, scriptName, eventName, script string, player *Player, eventArgs ...string) gs2VMResult {
+	result := s.runServerSideGS2WithEnv(scriptType, scriptName, eventName, script, map[string]string{"GS2_PLAYER": encodeGS2VMMap(snapshotGS2Player(player))}, eventArgs...)
+	return result
 }

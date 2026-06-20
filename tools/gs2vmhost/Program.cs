@@ -10,6 +10,8 @@ namespace GServer.Go.Tools.GS2VmHost;
 
 internal static class Program
 {
+	private static ScriptVariable CurrentPlayer { get; set; } = new();
+
 	private static async Task<int> Main(string[] args)
 	{
 		if (args.Length < 3)
@@ -58,6 +60,13 @@ internal static class Program
 				{ "triggerclient", "", TriggerClient },
 			}
 		);
+		ScriptProperties<VmGlobals>.AddProperties(
+			null,
+			new()
+			{
+				{ "player", "", _ => CurrentPlayer },
+			}
+		);
 		foreach (var property in GlobalProperties.Where(x => !x.Value.Compiled))
 		{
 			property.Value.Compile();
@@ -68,7 +77,7 @@ internal static class Program
 	{
 		if (args.Length > 0)
 		{
-			Console.WriteLine($"ECHO\t{args[0]?.GetValue()?.ToString() ?? ""}");
+			Console.WriteLine($"ECHO\t{StackValueToString(args[0])}");
 		}
 		return 0;
 	}
@@ -84,9 +93,15 @@ internal static class Program
 		{
 			return 0;
 		}
-		var parts = args.Select(arg => (arg?.GetValue()?.ToString() ?? "").Replace("\t", " "));
+		var parts = args.Skip(1).Select(arg => StackValueToString(arg).Replace("\t", " "));
 		Console.WriteLine($"TRIGGERCLIENT\t{string.Join('\t', parts)}");
 		return 0;
+	}
+
+	private static string StackValueToString(IStackEntry? entry)
+	{
+		var value = entry?.GetValue();
+		return value is IEnumerable<string> strings ? string.Join(",", strings) : value?.ToString() ?? "";
 	}
 
 	private static void RegisterDataObjects()
@@ -95,6 +110,7 @@ internal static class Program
 		RegisterGlobalObject("server", BuildServerFlagObject(flags, "server."));
 		RegisterGlobalObject("serverr", BuildServerFlagObject(flags, "serverr."));
 		RegisterGlobalObject("serveroptions", BuildObject(LoadEnvMap("GS2_SERVER_OPTIONS")));
+		CurrentPlayer = BuildObject(LoadEnvMap("GS2_PLAYER"));
 	}
 
 	private static Dictionary<string, string> LoadEnvMap(string name)
@@ -140,7 +156,16 @@ internal static class Program
 		var obj = new ScriptVariable();
 		foreach (var (key, value) in values)
 		{
-			obj.AddOrUpdate(key.Trim().ToLowerInvariant(), value.ToStackEntry());
+			var name = key.Trim().ToLowerInvariant();
+			var parts = value.Split(',');
+			if (parts.Length > 1)
+			{
+				obj.AddOrUpdate(name, parts.ToList().ToStackEntry());
+			}
+			else
+			{
+				obj.AddOrUpdate(name, value.ToStackEntry());
+			}
 		}
 		return obj;
 	}

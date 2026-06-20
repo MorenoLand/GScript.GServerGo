@@ -2072,6 +2072,8 @@ type Player struct {
 	playerType                                                                int
 	versionId                                                                 int
 	lastData, lastMovement, lastChat, lastNick, lastMessage, lastSave, last1m time.Time
+	lastServersideTrigger                                                     time.Time
+	lastServersideTriggerAction                                               string
 	cachedLevels                                                              []*CachedLevel
 	rcLargeFiles                                                              map[string]string
 	singleplayerLevels                                                        map[string]*Level
@@ -4008,17 +4010,20 @@ func (p *Player) sendWeapon(weapon *Weapon) bool {
 	if weapon == nil {
 		return false
 	}
+	sendBytecode := len(weapon.bytecode) > 0 && p.supportsRawWeaponScript()
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCWEAPONADD)
 	buf.WriteGChar(byte(len(weapon.name))).Write([]byte(weapon.name))
 	if weapon.image != "" {
 		buf.WriteGChar(NPCPROP_IMAGE).WriteGChar(byte(len(weapon.image))).Write([]byte(weapon.image))
 	}
-	if script, ok := formatClientsideWeaponScript(weapon.script); ok {
-		buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(len(script))).Write([]byte(script))
+	if !sendBytecode {
+		if script, ok := formatClientsideWeaponScript(weapon.script); ok {
+			buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(len(script))).Write([]byte(script))
+		}
 	}
 	p.send(buf)
-	if len(weapon.bytecode) > 0 {
+	if sendBytecode {
 		p.server.logger.Debug("sendWeapon: sending bytecode for %s (%d bytes)", weapon.name, len(weapon.bytecode))
 		p.sendRawNpcWeaponScript(weapon.bytecode)
 	}
@@ -5047,6 +5052,10 @@ func (p *Player) supportsRawClassScript() bool {
 	return p != nil && p.versionId >= 300
 }
 
+func (p *Player) supportsRawWeaponScript() bool {
+	return p != nil && p.versionId >= 300
+}
+
 func (p *Player) readPlayerPowerImageProp(sword bool, buf *Buffer) {
 	power := int(buf.ReadGChar())
 	if sword {
@@ -5557,6 +5566,15 @@ func (p *Player) msgPLI_TRIGGERACTION(packet []byte) bool {
 	y := buf.ReadGChar()
 	action := strings.TrimSpace(string(buf.ReadBytes(buf.BytesLeft())))
 	p.server.logger.Debug("TRIGGERACTION npc=%d at %d,%d: %s", npcId, x, y, action)
+	if strings.HasPrefix(strings.ToLower(action), "serverside,") {
+		now := time.Now()
+		if action == p.lastServersideTriggerAction && now.Sub(p.lastServersideTrigger) < 500*time.Millisecond {
+			p.server.logger.Debug("Ignoring duplicate serverside trigger from %s: %s", p.accountName, action)
+			return true
+		}
+		p.lastServersideTriggerAction = action
+		p.lastServersideTrigger = now
+	}
 	parts := strings.Split(action, ",")
 	if len(parts) == 0 {
 		return true
