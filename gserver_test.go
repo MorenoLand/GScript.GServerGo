@@ -424,6 +424,37 @@ func TestNCWeaponApplyOnCreatedFindsApplyingAccount(t *testing.T) {
 	}
 }
 
+func TestNCWeaponApplyReportsUpdateBeforeServerSideOutput(t *testing.T) {
+	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
+	nc := NewPlayer(nil, server)
+	nc.id = 3
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.loaded = true
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+	packet := NewBuffer()
+	packet.WriteByte(PLI_NC_WEAPONADD)
+	packet.WriteGChar(byte(len("-order")))
+	packet.Write([]byte("-order"))
+	packet.WriteGChar(byte(len("bcalarmclock.png")))
+	packet.Write([]byte("bcalarmclock.png"))
+	packet.Write([]byte(`function onCreated() {
+ echo("server output");
+}`))
+
+	if !nc.msgPLI_NC_WEAPONADD(packet.Bytes()) {
+		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
+	}
+	updateIdx := bytes.Index(nc.outQueue, []byte("Weapon/GUI-script -order added by moondeath"))
+	outputIdx := bytes.Index(nc.outQueue, []byte("server output"))
+	if updateIdx < 0 || outputIdx < 0 || updateIdx > outputIdx {
+		t.Fatalf("NC output order wrong update=%d output=%d queue=% X", updateIdx, outputIdx, nc.outQueue)
+	}
+}
+
 func TestServerSideWeaponPersistsThisButNotTemp(t *testing.T) {
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)

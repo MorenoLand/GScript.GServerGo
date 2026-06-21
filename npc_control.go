@@ -427,13 +427,6 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	if p.server.npcServerRunning() {
 		compileResult = p.server.compileGS2ForFeedback("weapon", weaponName, weaponCode)
 	}
-	if compileResult.errText != "" {
-		p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "error", compileResult.errText)
-		return true
-	}
-	if compileResult.warningText != "" {
-		p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "warning", compileResult.warningText)
-	}
 	actionTaken := ""
 	weapon := p.server.GetWeapon(weaponName)
 	if weapon != nil {
@@ -459,10 +452,17 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 		if err := p.server.saveWeaponFile(weapon); err != nil {
 			p.server.logger.Warning("Failed to save weapon %s: %v", weaponName, err)
 		}
-		p.server.runServerSideWeaponEventForPlayer(weapon, "onCreated", p)
 		logMsg := fmt.Sprintf("Weapon/GUI-script %s %s by %s", weaponName, actionTaken, p.accountName)
 		p.server.logger.Info(logMsg)
 		p.server.sendToNC(logMsg)
+		if compileResult.errText != "" {
+			p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "error", compileResult.errText)
+			return true
+		}
+		if compileResult.warningText != "" {
+			p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "warning", compileResult.warningText)
+		}
+		p.server.runServerSideWeaponEventForPlayer(weapon, "onCreated", p)
 	}
 	return true
 }
