@@ -71,10 +71,14 @@ func (p *Player) handlePlayerChatCommand(chat string) bool {
 		}
 	case "update":
 		if strings.EqualFold(trimmed, "update level") && p.hasRight(PLPERM_UPDATELEVEL) {
+			var level *Level
 			if p.currentLevel != nil {
-				p.currentLevel.reload(p.server)
-			} else if level := p.server.GetLevel(cleanLevelName(p.levelName)); level != nil {
-				level.reload(p.server)
+				level = p.currentLevel
+			} else if cachedLevel := p.server.GetLevel(cleanLevelName(p.levelName)); cachedLevel != nil {
+				level = cachedLevel
+			}
+			if level != nil && level.reload(p.server) {
+				p.server.resendLevelData(level)
 			}
 			p.clearChatWithProps()
 			return true

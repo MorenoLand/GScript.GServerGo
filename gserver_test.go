@@ -7547,18 +7547,17 @@ func TestPlayerChatCommandUpdateLevelReloadsCurrentLevel(t *testing.T) {
 		settings: NewSettings(),
 		config:   NewFileSystem(dir),
 	}
-	level := &Level{
-		levelName:      "onlinestartlocal",
-		fileName:       "onlinestartlocal.nw",
-		boardChanges:   []LevelBoardChange{{x: 1, y: 2, width: 1, height: 1}},
-		tiles:          make(map[uint8]*LevelTiles),
-		baddies:        make(map[uint8]*LevelBaddy),
-		npcs:           make(map[uint32]*NPC),
-		players:        []uint16{1},
-		isSparringZone: true,
+	levelName := "world/onlinestartlocal.nw"
+	writeTestFile(t, server.config.GetBasePath(), levelName, "GLEVNW01\n")
+	level := NewLevel()
+	if !level.loadLevel(server, levelName) {
+		t.Fatalf("initial loadLevel failed")
 	}
-	server.levels[level.levelName] = level
-	p := NewPlayer(nil, server)
+	level.boardChanges = []LevelBoardChange{{x: 1, y: 2, width: 1, height: 1}}
+	level.players = []uint16{1}
+	level.isSparringZone = true
+	server.AddLevel(level)
+	p := NewPlayer(fakeConn{remote: fakeAddr("127.0.0.1:1234")}, server)
 	p.id = 1
 	p.playerType = PLTYPE_CLIENT3
 	p.loaded = true
@@ -7566,7 +7565,9 @@ func TestPlayerChatCommandUpdateLevelReloadsCurrentLevel(t *testing.T) {
 	p.adminRights = PLPERM_UPDATELEVEL
 	p.levelName = "onlinestartlocal.nw"
 	p.currentLevel = level
+	p.queueOutgoing = true
 	server.players[p.id] = p
+	writeTestFile(t, server.config.GetBasePath(), levelName, "GLEVNW02\n")
 
 	packet := NewBuffer()
 	packet.WriteByte(PLI_PLAYERPROPS)
@@ -7577,6 +7578,9 @@ func TestPlayerChatCommandUpdateLevelReloadsCurrentLevel(t *testing.T) {
 	}
 	if len(level.boardChanges) != 0 || level.isSparringZone {
 		t.Fatalf("level was not reloaded: boardChanges=%d spar=%v", len(level.boardChanges), level.isSparringZone)
+	}
+	if !bytes.Contains(p.outQueue, []byte{PLO_RAWDATA + 32}) {
+		t.Fatalf("update level did not resend full board data: % X", p.outQueue)
 	}
 }
 
