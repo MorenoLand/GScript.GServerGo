@@ -26,11 +26,30 @@
 ## Core Functions
 
 - `echo(value...)`
+- `trace(value...)`
 - `int(value)`
+- `float(value)`
+- `double(value)`
+- `strtofloat(value)`
+- `abs(value)`
+- `ceil(value)`
+- `floor(value)`
+- `sin(value)`
+- `cos(value)`
+- `tan(value)`
 - `random(min, max)`
 - `char(code)`
 - `strlen(value)`
+- `hideimgs(start, count)`
+- `keycode(code)`
 - `isObject(value)`
+- `strequals(left, right)`
+- `strcontains(value, search)`
+- `contains(value, search)`
+- `startswith(value, prefix)`
+- `endswith(value, suffix)`
+- `uppercase(value)`
+- `lowercase(value)`
 - `replacetext(value, search, replacement)`
 - `toJson(value)`
 - `base64encode(value)`
@@ -41,14 +60,8 @@
 ## Class And Scheduling Functions
 
 - `loadclass(name)` is accepted as a no-op runtime call.
-- `join(name)` is accepted as a no-op runtime call after server-side class expansion has already happened.
-- `leave(name)` is accepted as a no-op runtime call.
-- `scheduleevent(delay, event)`
-- `scheduleEvent(delay, event)`
-- `this.scheduleevent(delay, event)`
-- `this.scheduleEvent(delay, event)`
-- `this.join(name)`
-- `this.leave(name)`
+- `join(name)` and `leave(name)` are accepted as no-op runtime calls after server-side class expansion has already happened; `this.join(name)` and `this.leave(name)` are accepted aliases.
+- `scheduleevent(delay, event)` queues a delayed event; `scheduleEvent(...)` and `this.scheduleEvent(...)` are accepted aliases.
 
 ## Player Functions
 
@@ -57,8 +70,11 @@
 - `setlevel2(level, x, y)`
 - `addweapon(name)`
 - `removeweapon(name)`
+- `sendpm(account, message)`
+- `sendplayer(account, message)`
 
 Bare `setlevel`, `setlevel2`, `addweapon`, and `removeweapon` target the player that triggered the current server-side event.
+Bare `sendpm` and `sendplayer` route to the supplied account.
 
 ## Player Objects
 
@@ -111,11 +127,13 @@ Assignments to `client.` and `clientr.` update the owning player's flags and que
 - `serverr.flag`
 
 Assignments update server flags and deletes remove server flags.
+Comma-separated flag values are exposed as indexed values, and `true`/`false` parts are typed as booleans.
 
 Examples:
 
 - `server.foo = "bar";`
 - `serverr.secret = true;`
+- `serverr.poopybutthole[0] == true`
 - `delete server.oldflag;`
 
 ## Server Options

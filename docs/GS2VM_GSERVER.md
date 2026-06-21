@@ -74,10 +74,7 @@ Handled result groups:
 
 ## Scheduled Events
 
-- `scheduleevent(delay, event)` queues a delayed VM event.
-- `scheduleEvent(delay, event)` does the same.
-- `this.scheduleevent(delay, event)` does the same.
-- `this.scheduleEvent(delay, event)` does the same.
+- `scheduleevent(delay, event)` queues a delayed VM event; `scheduleEvent(...)` and `this.scheduleEvent(...)` are accepted aliases.
 - Event names without `on` are resolved against matching `on...` handlers.
 - Scheduled events reuse the script type, script name, source, player context, NPC ID, and exported `this.` state from the original run.
 - Applying or reloading a weapon/NPC script invalidates previously scheduled events from the old script runtime.

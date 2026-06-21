@@ -17,6 +17,8 @@
 - `onCreated()` runs when a weapon, DB NPC, or level NPC script is applied or loaded.
 - `onInitialized()` runs when the NPC-server starts for active server-side scripts.
 - `onPlayerLogin()` and `onPlayerLogout()` run for active weapon and DB NPC server-side scripts.
+- `onPlayerLogin(pl)` and `onPlayerLogout(pl)` receive the connecting/disconnecting player object; `params[0]` is the same object.
+- Single-line functions can omit braces, and top-level comma-separated statements execute in order.
 
 ## State
 
@@ -41,6 +43,7 @@
 - `public function` is accepted and translated to `function`.
 - `enum { A, B, C }` becomes numeric constants starting at `0`.
 - `(@funcname)(args...)` dynamically calls a function by name.
+- `object.(expr)` dynamically reads or writes a property name.
 - `.size()` is translated to `.length`.
 - `value in {"a", "b"}` is supported for simple values and inline array literals.
 
@@ -49,7 +52,21 @@
 - Inline assignment arrays are supported: `temp.items = {"a", "b"};`
 - Inline array arguments are supported: `echo({"a", "b"}[0]);`
 - `new[size]` creates a JavaScript array of that size.
+- Multi-dimensional `new[x][y]` arrays are supported.
 - Array values support `.add(value...)`.
+- Array values support `.addarray(array)`.
+- Array values support `.insert(index, value)`.
+- Array values support `.replace(index, value)`.
+- Array values support `.index(value)`.
+- Array values support `.indices(value)`.
+- Array values support `.delete(index)`.
+- Array values support `.remove(value)`.
+- Array values support `.clear()`.
+- Array values support `.sortascending()`.
+- Array values support `.sortdescending()`.
+- Array values support `.sortbyvalue(name, type, ascending)`.
+- Array values support `.insertarray(index, array)`.
+- Array values support `.subarray(start, length)`.
 - Array values support `.loadlines(filename)`.
 - Array values support `.savelines(filename, mode)`.
 
@@ -57,19 +74,24 @@
 
 - Classic `for (...)` loops are supported.
 - `For (...)` is normalized to `for (...)`.
+- `do { ... } while (condition);` loops are supported.
 - `for (temp.item : list)` is supported.
 - `for (temp.item in list)` is supported.
 - Foreach loops with `temp.item` expose both `temp.item` and bare `item` inside the loop body.
+- `maxlooplimit` defaults to `10000` loop ticks and can be raised per script before a heavy loop.
 
 ## Strings
 
-- String values support `.substring(start, length)` using GS2 length semantics.
+- String values support `.substring(start)` and `.substring(start, length)` using GS2 length semantics.
 - String values support `.tokenize(delimiter)`.
 - String values support `.pos(needle)`.
 - String values support `.starts(prefix)`.
+- String values support `.startswith(prefix)`.
 - String values support `.ends(suffix)`.
+- String values support `.endswith(suffix)`.
 - String values support `.trim()`.
 - String values support `.lower()`.
 - String values support `.upper()`.
+- String methods work on variables, string literals, and parenthesized string expressions.
 - String values support `.loadstring(filename)`.
 - String values support `.savestring(filename, mode)`.
