@@ -2075,8 +2075,10 @@ func (s *Server) resendLevelData(level *Level) {
 			if levelName == "" {
 				levelName = level.levelName
 			}
-			player.currentLevel = level
-			player.sendLevelData(level, levelName, 0, false, true)
+			if strings.ContainsAny(levelName, `/\`) {
+				levelName = filepath.Base(filepath.ToSlash(levelName))
+			}
+			player.warp(levelName, float64(player.x)/16, float64(player.y)/16)
 		}
 	}
 }

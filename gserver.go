@@ -3889,8 +3889,13 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	buf.WriteByte(PLO_NPCPROPS).WriteGInt(uint32(npc.id))
 	buf.WriteGChar(NPCPROP_X).WriteGChar(byte(npc.x / 8))
 	buf.WriteGChar(NPCPROP_Y).WriteGChar(byte(npc.y / 8))
+	buf.WriteGChar(NPCPROP_X2).WriteGShort(encodeSignedGShortCoord(npc.x))
+	buf.WriteGChar(NPCPROP_Y2).WriteGShort(encodeSignedGShortCoord(npc.y))
 	if npc.image != "" {
 		buf.WriteGChar(NPCPROP_IMAGE).WriteGChar(byte(len(npc.image))).Write([]byte(npc.image))
+		if npc.visFlags == 0 {
+			buf.WriteGChar(NPCPROP_VISFLAGS).WriteGChar(NPCVISFLAG_VISIBLE)
+		}
 	}
 	if npc.script != "" {
 		scriptLen := len(npc.script)
@@ -6951,7 +6956,7 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 				script.WriteString(lines[i] + "\n")
 				i++
 			}
-			npc := &NPC{npcType: LEVELNPC, x: int16(npcx), y: int16(npcy), z: 0, image: image, script: script.String(), level: l, saves: [10]byte{}}
+			npc := &NPC{npcType: LEVELNPC, x: int16(npcx * 16), y: int16(npcy * 16), z: 0, image: image, script: script.String(), level: l, saves: [10]byte{}}
 			if server.AddNPC(npc) {
 				l.npcs[npc.id] = npc
 				server.runServerSideNPCEventForPlayer(npc, "onCreated", nil)

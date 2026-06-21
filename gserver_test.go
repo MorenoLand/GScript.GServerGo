@@ -3890,9 +3890,13 @@ func TestRCFileBrowserUploadReloadsRootWorldLevelLoadedByWarp(t *testing.T) {
 		t.Fatalf("uploaded level NPC count = %d, want 1", len(level.npcs))
 	}
 	for _, npc := range level.npcs {
-		if npc.image != "block.png" || npc.x != 30 || npc.y != 30 {
-			t.Fatalf("uploaded level NPC = %#v, want block.png at 30,30", npc)
+		if npc.image != "block.png" || npc.x != 30*16 || npc.y != 30*16 {
+			t.Fatalf("uploaded level NPC = %#v, want block.png at 30,30 level coords", npc)
 		}
+	}
+	wantWarp := append([]byte{PLO_PLAYERWARP + 32, 60 + 32, 60 + 32}, []byte("onlinestartlocal.nw\n")...)
+	if !bytes.Contains(client.outQueue, wantWarp) {
+		t.Fatalf("client did not receive same-level reload warp: % X", client.outQueue)
 	}
 	if !bytes.Contains(client.outQueue, []byte{PLO_BOARDPACKET + 32}) {
 		t.Fatalf("client did not receive refreshed board packet: % X", client.outQueue)
@@ -8102,8 +8106,14 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	npcID.WriteGInt(3)
 	scriptLen := NewBuffer()
 	scriptLen.WriteGShort(uint16(len(npc.script)))
+	npcX2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.x)).Bytes()
+	npcY2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.y)).Bytes()
 	want := append([]byte{PLO_NPCPROPS + 32}, npcID.Bytes()...)
 	want = append(want, NPCPROP_X+32, byte(npc.x/8)+32, NPCPROP_Y+32, byte(npc.y/8)+32)
+	want = append(want, NPCPROP_X2+32)
+	want = append(want, npcX2...)
+	want = append(want, NPCPROP_Y2+32)
+	want = append(want, npcY2...)
 	want = append(want, NPCPROP_IMAGE+32, byte(len(npc.image))+32)
 	want = append(want, []byte(npc.image)...)
 	want = append(want, NPCPROP_SCRIPT+32)
