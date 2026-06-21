@@ -423,7 +423,10 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	weaponImage := string(buf.ReadBytes(int(weaponImageLen)))
 	weaponCode := buf.ReadString()
 	weaponCode = decodeNCScriptText(weaponCode)
-	compileResult := p.server.compileGS2ForFeedback("weapon", weaponName, weaponCode)
+	compileResult := gs2CompileResult{}
+	if p.server.npcServerRunning() {
+		compileResult = p.server.compileGS2ForFeedback("weapon", weaponName, weaponCode)
+	}
 	if compileResult.errText != "" {
 		p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "error", compileResult.errText)
 		return true

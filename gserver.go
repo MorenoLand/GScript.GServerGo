@@ -41,46 +41,48 @@ const zlibFixScript = "//#CLIENTSIDE\xa7" +
 
 // ============ SERVER ============
 type Server struct {
-	name            string
-	running         bool
-	config          *FileSystem
-	settings        *Settings
-	adminSettings   *Settings
-	logger          *Logger
-	socketMgr       *SocketManager
-	listener        net.Listener
-	players         map[uint16]*Player
-	playerMu        sync.RWMutex
-	playerIdGen     uint16
-	allowedVersions []string
-	levels          map[string]*Level
-	levelMu         sync.RWMutex
-	npcs            map[uint32]*NPC
-	npcMu           sync.RWMutex
-	npcIdGen        uint32
-	weapons         map[string]*Weapon
-	classes         map[string]*ScriptClass
-	weaponMu        sync.RWMutex
-	flags           map[string]string
-	flagMu          sync.RWMutex
-	serverList      *ServerList
-	serverLists     []*ServerList
-	npcServer       *NPCServer
-	triggerCommands map[string]func(*Player, []string) bool
-	serverMessage   string
-	serverTime      uint
-	startTime       time.Time
-	lastTimer       time.Time
-	last1mTimer     time.Time
-	last5mTimer     time.Time
-	shutdown        chan struct{}
-	wordFilter      *WordFilter
-	scriptHelpMu    sync.RWMutex
-	scriptHelp      []ScriptHelpEntry
-	scriptHelpRaw   string
-	scriptHelpReady bool
-	scriptHelpCheck time.Time
-	scriptHelpBusy  bool
+	name             string
+	running          bool
+	config           *FileSystem
+	settings         *Settings
+	adminSettings    *Settings
+	logger           *Logger
+	socketMgr        *SocketManager
+	listener         net.Listener
+	players          map[uint16]*Player
+	playerMu         sync.RWMutex
+	playerIdGen      uint16
+	allowedVersions  []string
+	levels           map[string]*Level
+	levelMu          sync.RWMutex
+	npcs             map[uint32]*NPC
+	npcMu            sync.RWMutex
+	npcIdGen         uint32
+	weapons          map[string]*Weapon
+	classes          map[string]*ScriptClass
+	weaponMu         sync.RWMutex
+	flags            map[string]string
+	flagMu           sync.RWMutex
+	serverList       *ServerList
+	serverLists      []*ServerList
+	npcServer        *NPCServer
+	triggerCommands  map[string]func(*Player, []string) bool
+	serverMessage    string
+	serverTime       uint
+	startTime        time.Time
+	lastTimer        time.Time
+	last1mTimer      time.Time
+	last5mTimer      time.Time
+	shutdown         chan struct{}
+	wordFilter       *WordFilter
+	scriptHelpMu     sync.RWMutex
+	scriptHelp       []ScriptHelpEntry
+	scriptHelpRaw    string
+	scriptHelpReady  bool
+	scriptHelpCheck  time.Time
+	scriptHelpBusy   bool
+	shutdownOnce     sync.Once
+	restartRequested bool
 }
 
 func NewServer(name string) *Server {
@@ -150,7 +152,7 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Stop() {
-	close(s.shutdown)
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
 	s.running = false
 	if s.npcServer != nil {
 		s.npcServer.stopWatching()
@@ -160,6 +162,17 @@ func (s *Server) Stop() {
 	}
 	s.socketMgr.Cleanup()
 	s.logger.Info("Server stopped")
+}
+
+func (s *Server) StopSoon(restart bool) {
+	if s == nil {
+		return
+	}
+	time.Sleep(100 * time.Millisecond)
+	if restart {
+		s.restartRequested = true
+	}
+	s.Stop()
 }
 
 func (s *Server) nextPlayerId() uint16 {
@@ -684,6 +697,80 @@ func (s *Server) saveDatabaseNPCFile(npc *NPC) error {
 	return s.config.SaveFile("npcs/npc"+npc.npcName+".txt", []byte(out.String()))
 }
 
+func (s *Server) savePutNPCs() (int, error) {
+	if s == nil {
+		return 0, nil
+	}
+	s.levelMu.RLock()
+	levels := make([]*Level, 0, len(s.levels))
+	for _, level := range s.levels {
+		if level != nil {
+			levels = append(levels, level)
+		}
+	}
+	s.levelMu.RUnlock()
+	count := 0
+	for _, level := range levels {
+		level.mu.RLock()
+		npcs := make([]*NPC, 0, len(level.npcs))
+		for _, npc := range level.npcs {
+			if npc != nil && npc.npcType == PUTNPC {
+				npcs = append(npcs, npc)
+			}
+		}
+		level.mu.RUnlock()
+		for _, npc := range npcs {
+			saved := *npc
+			saved.npcType = DBNPC
+			saved.npcName = savedPutNPCName(level.levelName, npc.id, count+1)
+			if saved.scriptType == "" {
+				saved.scriptType = "PUTNPC"
+			}
+			if saved.scripter == "" {
+				saved.scripter = "NPC-Server"
+			}
+			saved.level = level
+			if saved.flagList != nil {
+				saved.flagList = copyStringMap(saved.flagList)
+			}
+			if err := s.saveDatabaseNPCFile(&saved); err != nil {
+				return count, err
+			}
+			count++
+		}
+	}
+	return count, nil
+}
+
+func savedPutNPCName(levelName string, id uint32, fallback int) string {
+	base := strings.TrimSuffix(filepath.Base(filepath.ToSlash(levelName)), filepath.Ext(levelName))
+	if base == "" || base == "." {
+		base = "level"
+	}
+	name := sanitizeNPCFilePart(base)
+	if id == 0 {
+		return fmt.Sprintf("%s_putnpc_%d", name, fallback)
+	}
+	return fmt.Sprintf("%s_putnpc_%d", name, id)
+}
+
+func sanitizeNPCFilePart(value string) string {
+	var out strings.Builder
+	for _, ch := range value {
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch >= '0' && ch <= '9', ch == '_', ch == '-':
+			out.WriteRune(ch)
+		default:
+			out.WriteByte('_')
+		}
+	}
+	cleaned := strings.Trim(out.String(), "_")
+	if cleaned == "" {
+		return "npc"
+	}
+	return cleaned
+}
+
 func (s *Server) deleteDatabaseNPCFile(npcName string) error {
 	if s == nil || s.config == nil || npcName == "" {
 		return nil
@@ -762,6 +849,9 @@ func (s *Server) saveWeaponFile(weapon *Weapon) error {
 
 func (s *Server) ensureWeaponBytecode(weapon *Weapon) {
 	if s == nil || weapon == nil || weapon.defPlayer || len(weapon.bytecode) > 0 {
+		return
+	}
+	if !s.npcServerRunning() {
 		return
 	}
 	if _, ok := clientsideGS2(weapon.script); !ok {
@@ -1582,6 +1672,35 @@ func (s *Server) updateWeaponForPlayers(weapon *Weapon) {
 		player.sendPLO_NPCWEAPONDEL(weapon.name)
 		player.sendAccountWeapon(weapon.name)
 	}
+}
+
+func (s *Server) updateAllWeaponsForPlayers() {
+	if s == nil {
+		return
+	}
+	s.weaponMu.RLock()
+	weapons := make([]*Weapon, 0, len(s.weapons))
+	seen := make(map[*Weapon]bool, len(s.weapons))
+	for _, weapon := range s.weapons {
+		if weapon != nil && !seen[weapon] {
+			weapons = append(weapons, weapon)
+			seen[weapon] = true
+		}
+	}
+	s.weaponMu.RUnlock()
+	for _, weapon := range weapons {
+		s.updateWeaponForPlayers(weapon)
+	}
+}
+
+func (s *Server) npcServerRunning() bool {
+	if s == nil {
+		return false
+	}
+	if s.npcServer == nil {
+		return true
+	}
+	return s.npcServer.Enabled()
 }
 
 func (s *Server) updateClassForPlayers(classObj *ScriptClass) {
@@ -4026,14 +4145,15 @@ func (p *Player) sendWeapon(weapon *Weapon) bool {
 	if weapon == nil {
 		return false
 	}
-	sendBytecode := len(weapon.bytecode) > 0 && p.supportsRawWeaponScript()
+	scriptsEnabled := p.server != nil && p.server.npcServerRunning()
+	sendBytecode := scriptsEnabled && len(weapon.bytecode) > 0 && p.supportsRawWeaponScript()
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCWEAPONADD)
 	buf.WriteGChar(byte(len(weapon.name))).Write([]byte(weapon.name))
 	if weapon.image != "" {
 		buf.WriteGChar(NPCPROP_IMAGE).WriteGChar(byte(len(weapon.image))).Write([]byte(weapon.image))
 	}
-	if !sendBytecode {
+	if scriptsEnabled && !sendBytecode {
 		if script, ok := formatClientsideWeaponScript(weapon.script); ok {
 			buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(len(script))).Write([]byte(script))
 		}

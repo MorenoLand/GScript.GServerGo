@@ -21,6 +21,7 @@ type NPCServer struct {
 	watcher    *fsnotify.Watcher
 	watchStop  chan struct{}
 	watching   bool
+	stopped    bool
 	watchMu    sync.Mutex
 	debounce   map[string]time.Time
 	debounceMu sync.Mutex
@@ -50,7 +51,7 @@ func (s *Server) syncNPCServerQuiet() {
 }
 
 func (n *NPCServer) Enabled() bool {
-	return n != nil && n.host != nil && n.host.settings != nil && n.host.settings.GetBool("serverside", false)
+	return n != nil && !n.stopped && n.host != nil && n.host.settings != nil && n.host.settings.GetBool("serverside", false)
 }
 
 func (n *NPCServer) Sync() {
@@ -107,11 +108,13 @@ func (n *NPCServer) Start() *Player {
 	if n == nil || n.host == nil {
 		return nil
 	}
+	n.stopped = false
 	if n.host.players == nil {
 		n.host.players = make(map[uint16]*Player)
 	}
 	if existing := n.Player(); existing != nil {
 		n.applyPlayerSettings(existing)
+		n.host.updateAllWeaponsForPlayers()
 		return existing
 	}
 
@@ -125,8 +128,21 @@ func (n *NPCServer) Start() *Player {
 		}
 	}
 	n.host.broadcastPlayerListEntryToClients(p)
+	n.host.updateAllWeaponsForPlayers()
 	n.host.logger.Info("NPC-Server initialized (id=%d account=%s nickname=%s type=%d x=%d y=%d)", p.id, p.accountName, p.character.nickName, p.playerType, int(p.x), int(p.y))
 	return p
+}
+
+func (n *NPCServer) Shutdown() {
+	if n == nil || n.host == nil {
+		return
+	}
+	n.stopped = true
+	n.stopWatching()
+	if player := n.Player(); player != nil {
+		n.host.DeletePlayer(player)
+	}
+	n.host.updateAllWeaponsForPlayers()
 }
 
 func (n *NPCServer) configuredNickname() string {
@@ -166,6 +182,9 @@ func (n *NPCServer) SendNCAddress(to *Player, queryPacket []byte) bool {
 		return false
 	}
 	if to.playerType&PLTYPE_ANYRC == 0 || !to.hasRight(PLPERM_NPCCONTROL) {
+		return false
+	}
+	if !n.Enabled() {
 		return false
 	}
 	if !n.isLocationQuery(queryPacket) {

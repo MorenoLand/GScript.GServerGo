@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -867,6 +868,60 @@ func (p *Player) handleRCCommand(message string) bool {
 		if arg != "" {
 			return p.msgPLI_RC_PLAYERPROPSRESET(rcCommandAccountPacket(arg))
 		}
+	case "/npcshutdown":
+		if p.requireNPCControlCommand(command) {
+			count, err := p.server.savePutNPCs()
+			if err != nil {
+				p.sendPLO_RC_CHAT("Server: Failed to save map NPCs: " + err.Error())
+				return true
+			}
+			p.server.ensureNPCServer().Shutdown()
+			p.server.sendRCChat(fmt.Sprintf("%s shut down the NPC-Server. Saved %d map NPC(s).", p.accountName, count))
+		}
+	case "/savenpcs":
+		if p.requireNPCControlCommand(command) {
+			count, err := p.server.savePutNPCs()
+			if err != nil {
+				p.sendPLO_RC_CHAT("Server: Failed to save map NPCs: " + err.Error())
+				return true
+			}
+			p.server.sendRCChat(fmt.Sprintf("%s saved %d map NPC(s).", p.accountName, count))
+		}
+	case "/npckill":
+		if p.requireNPCControlCommand(command) {
+			p.server.ensureNPCServer().Shutdown()
+			p.server.sendRCChat(p.accountName + " killed the NPC-Server.")
+		}
+	case "/shutdown":
+		if p.requireAllRightsCommand(command) {
+			p.server.sendRCChat(p.accountName + " shut down the server.")
+			go p.server.StopSoon(false)
+		}
+	case "/restart":
+		if p.requireAllRightsCommand(command) {
+			p.server.sendRCChat(p.accountName + " restarted the server.")
+			go p.server.StopSoon(true)
+		}
+	}
+	return true
+}
+
+func (p *Player) requireNPCControlCommand(command string) bool {
+	if p == nil || p.server == nil || !p.hasRight(PLPERM_NPCCONTROL) || !p.adminIPMatchesRemote() {
+		if p != nil {
+			p.sendPLO_RC_CHAT("Server: You are not authorized to use " + command + ".")
+		}
+		return false
+	}
+	return true
+}
+
+func (p *Player) requireAllRightsCommand(command string) bool {
+	if p == nil || p.server == nil || p.adminRights&allLocalRights() != allLocalRights() || !p.adminIPMatchesRemote() {
+		if p != nil {
+			p.sendPLO_RC_CHAT("Server: You are not authorized to use " + command + ".")
+		}
+		return false
 	}
 	return true
 }

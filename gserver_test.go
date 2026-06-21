@@ -366,6 +366,7 @@ func TestServerSideGS2FindPlayerSetsClientFlagsAndSendsPM(t *testing.T) {
 
 func TestServerSideWeaponPersistsThisButNotTemp(t *testing.T) {
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	weapon := &Weapon{name: "-test", script: `function onCreated() {
 		temp.once = "gone";
 		this.saved = "kept";
@@ -392,6 +393,7 @@ func TestServerSideWeaponPersistsThisButNotTemp(t *testing.T) {
 
 func TestServerSideWeaponVMErrorUsesCompilerOutputFormat(t *testing.T) {
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	weapon := &Weapon{name: "-test", script: `function onCreated() {
 		temp.foo = findplayer("missing");
 		temp.foo.sendpm("kek");
@@ -414,6 +416,85 @@ func TestServerSideWeaponVMErrorUsesCompilerOutputFormat(t *testing.T) {
 	}
 	if !bytes.Contains(nc.outQueue, []byte("sendpm")) {
 		t.Fatalf("missing cleaned VM error details: % X", nc.outQueue)
+	}
+}
+
+func TestNPCShutdownStopsServerSideWeaponRuntimeAndScriptDelivery(t *testing.T) {
+	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
+	weapon := &Weapon{name: "-test", image: "bcalarmclock.png", bytecode: []byte("bytecode:weapon:-test"), script: `function onActionServerside() {
+		echo("online");
+	}
+	//#CLIENTSIDE
+	function onCreated() {
+		player.chat = "client";
+	}`}
+	server.AddWeapon(weapon)
+	nc := NewPlayer(nil, server)
+	nc.id = 7
+	nc.playerType = PLTYPE_NC
+	nc.accountName = "moondeath"
+	nc.queueOutgoing = true
+	nc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[nc.id] = nc
+	player := NewPlayer(nil, server)
+	player.id = 8
+	player.versionId = 600
+	player.playerType = PLTYPE_CLIENT3
+	player.accountName = "moondeath"
+	player.queueOutgoing = true
+	player.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[player.id] = player
+
+	server.runServerSideWeaponEventForPlayer(weapon, "onActionServerside", player)
+	if !bytes.Contains(nc.outQueue, append([]byte{PLO_RC_CHAT + 32}, []byte("online")...)) {
+		t.Fatalf("expected online GS2 output before NPC shutdown, got % X", nc.outQueue)
+	}
+
+	nc.outQueue = nil
+	player.outQueue = nil
+	server.ensureNPCServer().Shutdown()
+	server.runServerSideWeaponEventForPlayer(weapon, "onActionServerside", player)
+	player.sendWeapon(weapon)
+
+	if bytes.Contains(nc.outQueue, []byte("online")) {
+		t.Fatalf("GS2 event still ran after NPC shutdown: % X", nc.outQueue)
+	}
+	if bytes.Contains(player.outQueue, []byte("bytecode:weapon:-test")) || bytes.Contains(player.outQueue, []byte("player.chat")) {
+		t.Fatalf("weapon script was delivered while NPC server was offline: % X", player.outQueue)
+	}
+}
+
+func TestSavePutNPCsWritesDatabaseNPCFiles(t *testing.T) {
+	server := newLoginTestServer(t)
+	level := NewLevel()
+	level.levelName = "levels/onlinestartlocal.nw"
+	level.actualLevelName = "onlinestartlocal.nw"
+	npc := NewNPC(PUTNPC)
+	npc.id = 77
+	npc.x = 16
+	npc.y = 32
+	npc.image = "block.png"
+	npc.script = "message hi;"
+	npc.flagList["foo"] = "bar"
+	level.npcs[npc.id] = npc
+	server.levels["onlinestartlocal.nw"] = level
+
+	count, err := server.savePutNPCs()
+	if err != nil {
+		t.Fatalf("savePutNPCs returned error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("savePutNPCs count = %d, want 1", count)
+	}
+	data, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "npcs", "npconlinestartlocal_putnpc_77.txt"))
+	if err != nil {
+		t.Fatalf("read saved putnpc file: %v", err)
+	}
+	for _, want := range []string{"GRNPC001", "NAME onlinestartlocal_putnpc_77", "STARTLEVEL levels/onlinestartlocal.nw", "FLAG foo=bar", "NPCSCRIPT\r\nmessage hi;\r\nNPCSCRIPTEND"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("saved putnpc file missing %q:\n%s", want, data)
+		}
 	}
 }
 
@@ -1005,6 +1086,7 @@ func TestNCWeaponListAfterWeaponAddIsSingleCleanPacket(t *testing.T) {
 func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.settings.Set("gs2compiler", os.Args[0])
 	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
@@ -1040,6 +1122,7 @@ func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
 func TestNCWeaponAddReportsCompilerOutputWhenOutputFileMissing(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.settings.Set("gs2compiler", os.Args[0])
 	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
@@ -1074,6 +1157,7 @@ func TestNCWeaponAddReportsCompilerOutputWhenOutputFileMissing(t *testing.T) {
 
 func TestNCWeaponAddWarnsWhenClientsideScriptCannotCompileWithoutCompiler(t *testing.T) {
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.weapons = map[string]*Weapon{}
 	nc := NewPlayer(nil, server)
 	nc.id = 3
@@ -1107,6 +1191,7 @@ func TestNCWeaponAddWarnsWhenClientsideScriptCannotCompileWithoutCompiler(t *tes
 func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.settings.Set("gs2compiler", os.Args[0])
 	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
@@ -1141,6 +1226,7 @@ func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
 func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.settings.Set("gs2compiler", os.Args[0])
 	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
@@ -2930,6 +3016,33 @@ func TestRCChatOpenCommandsDefaultToOwnAccount(t *testing.T) {
 	}
 }
 
+func TestRCChatNPCShutdownStopsNPCServer(t *testing.T) {
+	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.id = 2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_NPCCONTROL
+	rc.adminIp = "*.*.*.*"
+	rc.accountIp = 0x7F000001
+	rc.queueOutgoing = true
+	rc.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[rc.id] = rc
+
+	rc.msgPLI_RC_CHAT(append([]byte{PLI_RC_CHAT}, []byte("/npcshutdown")...))
+
+	if server.npcServer == nil || server.npcServer.Enabled() {
+		t.Fatalf("npc server still enabled after /npcshutdown")
+	}
+	if player := server.npcServer.Player(); player != nil {
+		t.Fatalf("npc-server player still registered after /npcshutdown: %#v", player)
+	}
+	if !bytes.Contains(rc.outQueue, append([]byte{PLO_RC_CHAT + 32}, []byte("Admin shut down the NPC-Server. Saved 0 map NPC(s).")...)) {
+		t.Fatalf("npcshutdown did not announce shutdown: % X", rc.outQueue)
+	}
+}
+
 func TestScriptHelpWildcardRegexMatchesPlainPrefixesAndWildcards(t *testing.T) {
 	plain, err := wildcardRegex("disableweapon")
 	if err != nil {
@@ -3705,6 +3818,11 @@ func newLoginTestServer(t *testing.T) *Server {
 	return server
 }
 
+func enableTestNPCServer(server *Server) {
+	server.settings.Set("serverside", "true")
+	server.initNPCServer()
+}
+
 func newRCFileBrowserTestPlayer(server *Server) *Player {
 	rc := NewPlayer(nil, server)
 	rc.playerType = PLTYPE_RC2
@@ -4155,7 +4273,7 @@ func TestNPCServerQuerySendsNCAddressToAuthorizedRC(t *testing.T) {
 	server := newLoginTestServer(t)
 	server.settings.Set("serverip", "orion.moreno.land")
 	server.settings.Set("serverport", "14802")
-	server.initNPCServer()
+	enableTestNPCServer(server)
 
 	rc := NewPlayer(nil, server)
 	rc.playerType = PLTYPE_RC2
@@ -8140,6 +8258,7 @@ func TestSendAccountWeaponFallsBackToScriptWeapon(t *testing.T) {
 func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.settings.Set("gs2compiler", os.Args[0])
 	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	weapon := &Weapon{
@@ -8174,6 +8293,7 @@ func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
 func TestLoginCompilesAccountWeaponsBeforeSending(t *testing.T) {
 	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
 	server.settings.Set("gs2compiler", os.Args[0])
 	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", ""+

@@ -189,6 +189,9 @@ func (s *Server) runServerSideWeaponEventForPlayer(weapon *Weapon, eventName str
 	if s == nil || weapon == nil || weapon.script == "" {
 		return
 	}
+	if !s.npcServerRunning() {
+		return
+	}
 	result := s.runServerSideWeaponGS2ForPlayer(weapon, eventName, player, eventArgs...)
 	if result.err != "" {
 		s.sendGS2VMErrorToNC("Weapon "+weapon.name, result.err)
@@ -276,7 +279,7 @@ func (s *Server) applyGS2VMResult(result gs2VMResult) {
 }
 
 func (s *Server) sendGS2PlayerPM(player *Player, message string) {
-	if s == nil || player == nil {
+	if s == nil || player == nil || !s.npcServerRunning() {
 		return
 	}
 	senderId := uint16(1)
