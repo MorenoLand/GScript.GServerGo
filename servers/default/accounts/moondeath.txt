@@ -1,17 +1,17 @@
 GRACC001
 NAME moondeath
-NICK moondeath
+NICK *moondeath
 COMMUNITYNAME moondeath
 LEVEL onlinestartlocal.nw
-X 30.00
-Y 30.50
+X 19.00
+Y 43.00
 Z 0
-MAXHP 0
-HP 0
-RUPEES 0
-ANI idle
-ARROWS 10
-BOMBS 5
+MAXHP 6
+HP 4
+RUPEES 577
+ANI sit
+ARROWS 40
+BOMBS 0
 GLOVEP 1
 SHIELDP 1
 SWORDP 1
@@ -20,23 +20,43 @@ BOW
 HEAD head0.png
 BODY body.png
 SWORD sword1.png
-SHIELD shield1.png
-COLORS 2,0,10,4,18
+SHIELD no-shield.png
+COLORS 2,4,18,4,18
 SPRITE 2
-STATUS 20
+STATUS 85
 MP 0
-AP 50
-APCOUNTER 60
+AP 57
+APCOUNTER 140
 ONSECS 0
-IP 0
+IP 2507697168
 LANGUAGE English
 KILLS 0
 DEATHS 0
 RATING 1500.000000
 DEVIATION 350.000000
+CHEST 24:33:world/onlinestartlocal.nw
+CHEST 15:32:world/onlinestartlocal.nw
+CHEST 20:24:world/onlinestartlocal.nw
+CHEST 24:33:onlinestartlocal.nw
+CHEST 20:24:onlinestartlocal.nw
+CHEST 15:32:onlinestartlocal.nw
+CHEST 24:24:onlinestartlocal.nw
+CHEST 20:27:onlinestartlocal.nw
+CHEST 23:19:onlinestartlocal.nw
+CHEST 31:21:onlinestartlocal.nw
 WEAPON bomb
 WEAPON bow
 WEAPON -gr_movement
+WEAPON -Staff/Level_Editor
+WEAPON -Staff/Link_Editor
+WEAPON -Staff/Toolbar
+WEAPON -Staff/NPC_Editor
+WEAPON -Staff/Gani_Editor
+WEAPON -Staff/Console
+WEAPON -Staff/Gui_Explorer
+WEAPON -den/etiles
+WEAPON -Core
+WEAPON test
 
 BANNED 0
 BANREASON 
@@ -46,4 +66,28 @@ EMAIL
 LOCALRIGHTS 1048575
 IPRANGE *.*.*.*
 LOADONLY 0
+FOLDERRIGHT rw heads/*
+FOLDERRIGHT rw bodies/*.png
+FOLDERRIGHT rw swords/*
+FOLDERRIGHT rw shields/*
+FOLDERRIGHT rw ganis/*.gani
+FOLDERRIGHT rw hats/*.png
+FOLDERRIGHT rw images/*.png
+FOLDERRIGHT rw images/*.gif
+FOLDERRIGHT rw images/*.mng
+FOLDERRIGHT rw sounds/*.mid
+FOLDERRIGHT rw sounds/*.mp3
+FOLDERRIGHT rw sounds/*.wav
+FOLDERRIGHT rw levels/*.gmap
+FOLDERRIGHT rw levels/*.nw
+FOLDERRIGHT rw levels/*.graal
+FOLDERRIGHT rw global/*
+FOLDERRIGHT rw global/heads/*
+FOLDERRIGHT rw global/bodies/*.png
+FOLDERRIGHT rw global/swords/*
+FOLDERRIGHT rw global/shields/*
+FOLDERRIGHT rw accounts/*
+FOLDERRIGHT rw */*
+FOLDERRIGHT rw */*/*
+FOLDERRIGHT rw */*/*/*
 LASTFOLDER 

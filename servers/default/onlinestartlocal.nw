@@ -68,18 +68,10 @@ CHEST 23 19 greenrupee 0
 CHEST 31 21 spinattack 0
 CHEST 20 27 fullheart 0
 NPC chest.png 22 39
-function onCreated() setshape(1, 32, 32);
+//function onCreated() setshape(1, 32, 32);
 function onActionTest() {
-   chat = "woah calm down" SPC player.account;
+   chat = "woah";
    echo("woah");
-}
-NPCEND
-
-NPC block.png 31 30
-chat = "click test";
-
-function onActionLeftMouse() {
-   chat = player.account SPC "clicked me last";
 }
 NPCEND
 
@@ -87,26 +79,7 @@ NPC block.png 31 38
 chat = "touch test";
 
 function onPlayerTouchsMe() {
-   chat = player.account SPC "touched me last";
-}
-NPCEND
-
-NPC - 38 30
-// NPC Created by Stefan Knorr
-function onCreated() {
-    // Initialize the attributes
-    showcharacter();
-    this.nick = "Bob";
-    this.headimg = "head0.png";
-    this.shieldimg = "shield1.png";
-    this.bodyimg = "body.png";
-    this.colors[0] = "orange";
-    this.colors[1] = "white";
-    this.colors[2] = "blue";
-    this.colors[3] = "red";
-    this.colors[4] = "black";
-    shieldpower = 1;
-    this.dir = 2;
+   chat = player.account SPC "toouched me last";
 }
 NPCEND
 

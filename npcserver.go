@@ -398,7 +398,19 @@ func (n *NPCServer) reloadWeaponFromDisk(relPath string) {
 
 	n.host.weaponMu.Lock()
 	existing := n.host.weapons[strings.ToLower(w.name)]
+	if existing == nil {
+		for _, weapon := range n.host.weapons {
+			if weapon != nil && strings.EqualFold(weapon.name, w.name) {
+				existing = weapon
+				break
+			}
+		}
+	}
 	if existing != nil {
+		if existing.image == w.image && existing.script == w.script && existing.bytecodeFile == w.bytecodeFile {
+			n.host.weaponMu.Unlock()
+			return
+		}
 		existing.image = w.image
 		existing.script = w.script
 		existing.bytecode = nil

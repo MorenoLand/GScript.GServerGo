@@ -1,17 +1,17 @@
 GRACC001
-NAME cadavre
-NICK cadavre
-COMMUNITYNAME cadavre
+NAME Z
+NICK *Z
+COMMUNITYNAME Z
 LEVEL onlinestartlocal.nw
-X 33.50
-Y 35.00
+X 39.50
+Y 27.50
 Z 0
 MAXHP 4
 HP 2
-RUPEES 144
+RUPEES 409
 ANI idle
-ARROWS 23
-BOMBS 0
+ARROWS 68
+BOMBS 4
 GLOVEP 1
 SHIELDP 1
 SWORDP 1
@@ -22,13 +22,13 @@ BODY body.png
 SWORD sword1.png
 SHIELD shield1.png
 COLORS 2,0,10,4,18
-SPRITE 3
-STATUS 20
+SPRITE 1
+STATUS 84
 MP 0
-AP 50
-APCOUNTER 60
+AP 51
+APCOUNTER 217
 ONSECS 0
-IP 1314009876
+IP 2507697168
 LANGUAGE English
 KILLS 0
 DEATHS 0
@@ -37,10 +37,11 @@ DEVIATION 350.000000
 CHEST 24:33:world/onlinestartlocal.nw
 CHEST 15:32:world/onlinestartlocal.nw
 CHEST 20:24:world/onlinestartlocal.nw
+CHEST 24:33:onlinestartlocal.nw
 WEAPON bomb
 WEAPON bow
 WEAPON -gr_movement
-FLAG killer=Z
+FLAG killer=cadavre
 
 BANNED 0
 BANREASON 

@@ -1,0 +1,18 @@
+GRAWP001
+REALNAME test
+IMAGE bcalarmclock.png
+BYTECODE weapontest.gs2bc
+SCRIPT
+function onCreated() {
+  findplayer("moondeath").addweapon(this.name);
+}
+//#CLIENTSIDE
+function onWeaponFired() {
+  setani("grab", nil);
+  triggeraction(getFrontPos()[0], getFrontPos()[1], "Test", 1);
+}
+
+public function getFrontPos(dir) { 
+  return ({{player.x + .5, player.y - 1},{player.x - 1, player.y + 1},{player.x + .5, player.y + 3.25},{player.x + 3.05, player.y + 1}})[(dir? dir : player.dir)];
+}
+SCRIPTEND
