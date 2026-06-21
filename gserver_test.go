@@ -979,6 +979,45 @@ func TestTriggerActionMatchesLevelNPCGraalCoordinates(t *testing.T) {
 	}
 }
 
+func TestTriggerActionMapsMouseActionsToServerSideNPCEvents(t *testing.T) {
+	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
+	level := NewLevel()
+	level.levelName = "onlinestartlocal.nw"
+	server.levels[level.levelName] = level
+	player := NewPlayer(nil, server)
+	player.id = 3
+	player.loaded = true
+	player.levelName = level.levelName
+	player.currentLevel = level
+	player.playerType = PLTYPE_CLIENT3
+	server.players[player.id] = player
+	level.players = []uint16{player.id}
+	npc := NewNPC(LEVELNPC)
+	npc.id = 80
+	npc.npcName = "mouse-test"
+	npc.x = 22 * 16
+	npc.y = 39 * 16
+	npc.width = 32
+	npc.height = 32
+	npc.script = `function onActionLeftMouse() chat = "left";
+function onActionRightMouse() chat = "right";
+function onActionMiddleMouse() chat = "middle";
+function onActionDoubleMouse() chat = "double";`
+	npc.level = level
+	server.npcs[npc.id] = npc
+	level.npcs[npc.id] = npc
+
+	cases := map[string]string{"leftmouse": "left", "rightmouse": "right", "middlemouse": "middle", "doublemouse": "double"}
+	for action, want := range cases {
+		npc.character.chatMessage = ""
+		server.runLevelNPCTriggerAction(player, 0, 45, 79, []string{action})
+		if npc.character.chatMessage != want {
+			t.Fatalf("%s npc chat = %q, want %q", action, npc.character.chatMessage, want)
+		}
+	}
+}
+
 func TestApplyGS2NPCActionSetShapeDoesNotToggleNoBlock(t *testing.T) {
 	server := newLoginTestServer(t)
 	npc := NewNPC(LEVELNPC)

@@ -562,7 +562,7 @@ func (s *Server) runLevelNPCTriggerAction(player *Player, npcID uint32, x, y int
 	if level == nil {
 		return
 	}
-	eventName := "onAction" + strings.TrimSpace(parts[0])
+	eventName := levelNPCTriggerEventName(parts[0])
 	args := []string{}
 	if len(parts) > 1 {
 		args = append(args, parts[1:]...)
@@ -578,6 +578,21 @@ func (s *Server) runLevelNPCTriggerAction(player *Player, npcID uint32, x, y int
 			continue
 		}
 		s.runServerSideNPCEventForPlayer(npc, eventName, player, args...)
+	}
+}
+
+func levelNPCTriggerEventName(action string) string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "leftmouse":
+		return "onActionLeftMouse"
+	case "rightmouse":
+		return "onActionRightMouse"
+	case "middlemouse":
+		return "onActionMiddleMouse"
+	case "doublemouse":
+		return "onActionDoubleMouse"
+	default:
+		return "onAction" + strings.TrimSpace(action)
 	}
 }
 
