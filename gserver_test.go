@@ -8105,7 +8105,8 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	npcID := NewBuffer()
 	npcID.WriteGInt(3)
 	scriptLen := NewBuffer()
-	scriptLen.WriteGShort(uint16(len(npc.script)))
+	npcScript := npcClientSideScript(npc.script)
+	scriptLen.WriteGShort(uint16(len(npcScript)))
 	npcX2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.x)).Bytes()
 	npcY2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.y)).Bytes()
 	npcZ2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.z)).Bytes()
@@ -8114,7 +8115,7 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	want = append(want, []byte(npc.image)...)
 	want = append(want, NPCPROP_SCRIPT+32)
 	want = append(want, scriptLen.Bytes()...)
-	want = append(want, []byte(npc.script)...)
+	want = append(want, []byte(npcScript)...)
 	want = append(want, NPCPROP_X+32, byte(npc.x/8)+32, NPCPROP_Y+32, byte(npc.y/8)+32, NPCPROP_Z+32, byte(50)+32)
 	want = append(want, NPCPROP_VISFLAGS+32, npc.visFlags+32)
 	want = append(want, NPCPROP_ID+32)
@@ -8148,6 +8149,41 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("npc props packet = % X, want % X", got, want)
+	}
+}
+
+func TestNpcPropsZeroScriptForModernClients(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{conn: serverConn, server: &Server{logger: NewLogger("", false)}, encryption: *NewEncryption(), versionId: 300}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+	npc := NewNPC(LEVELNPC)
+	npc.id = 7
+	npc.image = "block.png"
+	npc.script = "chat = \"hey\";\n"
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendPLO_NPCPROPS(npc)
+		done <- struct{}{}
+	}()
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, 256)
+	n, err := clientConn.Read(got)
+	if err != nil {
+		t.Fatalf("read npc props packet: %v", err)
+	}
+	<-done
+	got = got[:n]
+	if bytes.Contains(got, []byte(npc.script)) {
+		t.Fatalf("modern npc props included script bytes: % X", got)
+	}
+	want := []byte{NPCPROP_SCRIPT + 32, 32, 32}
+	if !bytes.Contains(got, want) {
+		t.Fatalf("modern npc props script length = % X, want zero-length marker % X", got, want)
 	}
 }
 

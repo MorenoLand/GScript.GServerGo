@@ -3888,11 +3888,15 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCPROPS).WriteGInt(uint32(npc.id))
 	buf.WriteGChar(NPCPROP_IMAGE).WriteGChar(byte(len(npc.image))).Write([]byte(npc.image))
-	scriptLen := len(npc.script)
+	script := npcClientSideScript(npc.script)
+	if p.versionId >= 300 {
+		script = ""
+	}
+	scriptLen := len(script)
 	if scriptLen > 0x3fff {
 		scriptLen = 0x3fff
 	}
-	buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(scriptLen)).Write([]byte(npc.script[:scriptLen]))
+	buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(scriptLen)).Write([]byte(script[:scriptLen]))
 	buf.WriteGChar(NPCPROP_X).WriteGChar(byte(npc.x / 8))
 	buf.WriteGChar(NPCPROP_Y).WriteGChar(byte(npc.y / 8))
 	zTile := npc.z / 16
@@ -3950,6 +3954,23 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	p.send(buf)
 	return true
 }
+
+func npcClientSideScript(script string) string {
+	const marker = "//#CLIENTSIDE"
+	normalized := strings.ReplaceAll(script, "\r\n", "\n")
+	idx := strings.Index(strings.ToUpper(normalized), marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := normalized[idx+len(marker):]
+	rest = strings.TrimLeft(rest, " \t\r\n")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return ""
+	}
+	return strings.ReplaceAll(rest, "\n", "\xa7")
+}
+
 func (p *Player) sendPLO_NPCDEL(npcId uint32) bool {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCDEL).WriteGInt(npcId)
