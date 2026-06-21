@@ -58,6 +58,7 @@ Handled result groups:
 
 ## NPC Actions
 
+- `onPlayerTouchsMe()` is called for server-side level NPCs when the gserver detects a player touching that NPC.
 - `setshape()` updates NPC rectangular blocking data.
 - `setshape2()` updates NPC tile-shape data.
 - Setting `chat` updates the NPC chat/message property.

@@ -32,14 +32,10 @@
 
 ## Operators And Translation
 
-- `SPC` concatenates values with a single space.
-- `TAB` concatenates values with a tab.
-- `NL` concatenates values with a newline.
-- `@` concatenates values without adding a separator.
+- `SPC`, `TAB`, and `NL` are GS2 string-combining tokens. They insert a space, tab, or newline between expressions.
+- `@` is GS2 string concatenation without an inserted separator.
 - `@=` appends to strings.
-- Bare `TAB` is also available as a tab string.
-- Bare `NL` is also available as a newline string.
-- `NULL` is JavaScript `null`.
+- `NULL` is the null literal.
 - `public function` is accepted and translated to `function`.
 - `enum { A, B, C }` becomes numeric constants starting at `0`.
 - `(@funcname)(args...)` dynamically calls a function by name.

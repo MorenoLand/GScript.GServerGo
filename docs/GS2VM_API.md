@@ -14,19 +14,16 @@
 - `serverr`
 - `serveroptions`
 - `allplayers`
+- `players`
 - `weapons`
 - `screenwidth`
 - `screenheight`
-- `TAB`
-- `NL`
-- `NULL`
-
-`TAB` and `NL` also work as GS2 concat tokens between expressions.
 
 ## Core Functions
 
 - `echo(value...)`
 - `trace(value...)`
+- `printf(format, value...)`
 - `int(value)`
 - `float(value)`
 - `double(value)`
@@ -56,6 +53,8 @@
 - `base64decode(value)`
 - `openurl(value)`
 - `sleep(value)`
+- `sendtorc(message)`
+- `sendtonc(message)`
 
 ## Class And Scheduling Functions
 
@@ -66,6 +65,7 @@
 ## Player Functions
 
 - `findplayer(value)`
+- `getplayer(value)`
 - `setlevel(level)`
 - `setlevel2(level, x, y)`
 - `addweapon(name)`
@@ -93,10 +93,13 @@ Supported methods:
 
 - `sendpm(message)`
 - `sendplayer(message)`
+- `sendtorc(message)`
 - `setlevel(level)`
 - `setlevel2(level, x, y)`
 - `addweapon(name)`
 - `removeweapon(name)`
+- `hasright(rights, filename)`
+- `hasrightflag(flag)`
 
 `sendplayer()` is treated as a compatible alias for `sendpm()`.
 
@@ -151,6 +154,7 @@ Example:
 ## Player And Weapon Lists
 
 - `allplayers` is an array of player objects visible to the VM.
+- `players` is the current level player array; the current implementation exposes the same player object array as `allplayers`.
 - `weapons` is an array of weapon objects.
 
 Weapon object fields:
@@ -190,6 +194,8 @@ Image objects currently expose:
 - `savestring(filename, value, mode)`
 - `savelines(filename, lines, mode)`
 - `findfiles(pattern, recursive)`
+- `deletefile(filename)`
+- `savelog2(filename, message)`
 
 Save mode accepts overwrite by default and append when mode is `1`, `true`, or `append`.
 
@@ -197,6 +203,8 @@ File operations are rooted to the configured VM file root and reject absolute pa
 
 ## NPC Functions
 
+- `findnpc(name)`
+- `findnpcbyid(id)`
 - `showcharacter()`
 - `setshape(shapeType, width, height)`
 - `setshape2(width, height, tileTypes)`
@@ -216,6 +224,8 @@ File operations are rooted to the configured VM file root and reject absolute pa
 - `canwarp()` / `canwarp2()` / `cannotwarp()`
 
 These only emit NPC actions when the VM run has an NPC ID.
+
+`findnpc()` and `findnpcbyid()` return NPC objects. String NPC names can also be used as object roots, so `Control-NPC.foo = true;` and `("Control-NPC").foo = true;` target that NPC when it exists.
 
 Current NPC scripts can also set `this.image`, `this.chat`, `this.dir`, `this.ani`, `this.nick`, `this.head`, `this.headimg`, `this.body`, `this.bodyimg`, `this.shieldimg`, `this.horseimg`, `this.hearts`, `this.gralats`, `this.arrows`, `this.bombs`, `this.darts`, `this.glovepower`, `this.shieldpower`, `this.ap`, and `this.colors[0..4]`. Bare `chat`, `image`, and the same property names are collected for the current NPC too.
 
