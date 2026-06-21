@@ -762,6 +762,29 @@ func TestSavePutNPCsWritesDatabaseNPCFiles(t *testing.T) {
 	}
 }
 
+func TestApplyGS2NPCMoveActionUpdatesPosition(t *testing.T) {
+	server := newLoginTestServer(t)
+	level := NewLevel()
+	level.levelName = "levels/onlinestartlocal.nw"
+	level.actualLevelName = "onlinestartlocal.nw"
+	npc := NewNPC(DBNPC)
+	npc.id = 88
+	npc.x = 160
+	npc.y = 96
+	npc.level = level
+	level.npcs[npc.id] = npc
+	server.levels["onlinestartlocal.nw"] = level
+	if !server.AddNPC(npc) {
+		t.Fatal("failed to register test npc")
+	}
+
+	server.applyGS2NPCAction(gs2VMNPCAction{id: npc.id, moveDX: 1.5, moveDY: -0.5, moveTime: 0.25, moveOptions: 8})
+
+	if npc.x != 184 || npc.y != 88 {
+		t.Fatalf("npc position = %d,%d; want 184,88", npc.x, npc.y)
+	}
+}
+
 func TestSnapshotGS2PlayerUsesPCIDForGuestAccount(t *testing.T) {
 	player := &Player{}
 	player.accountName = "guest"

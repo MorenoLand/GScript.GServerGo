@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -84,15 +85,19 @@ type gs2VMNPCFunctionCall struct {
 }
 
 type gs2VMNPCAction struct {
-	id        uint32
-	shapeType int
-	width     int
-	height    int
-	tileTypes []string
-	chat      string
-	warpLevel string
-	warpX     float64
-	warpY     float64
+	id          uint32
+	shapeType   int
+	width       int
+	height      int
+	tileTypes   []string
+	chat        string
+	warpLevel   string
+	warpX       float64
+	warpY       float64
+	moveDX      float64
+	moveDY      float64
+	moveTime    float64
+	moveOptions int
 }
 
 type gs2VMSocketAction struct {
@@ -195,7 +200,7 @@ func (s *Server) runServerSideGS2NativeWithStateAndSocket(scriptType, scriptName
 		out.npcFunctionCalls = append(out.npcFunctionCalls, gs2VMNPCFunctionCall{id: call.ID, name: call.Name, function: call.Function, args: call.Args})
 	}
 	for _, action := range result.NPCActions {
-		out.npcActions = append(out.npcActions, gs2VMNPCAction{id: action.ID, shapeType: action.ShapeType, width: action.Width, height: action.Height, tileTypes: action.TileTypes, chat: action.Chat, warpLevel: action.WarpLevel, warpX: action.WarpX, warpY: action.WarpY})
+		out.npcActions = append(out.npcActions, gs2VMNPCAction{id: action.ID, shapeType: action.ShapeType, width: action.Width, height: action.Height, tileTypes: action.TileTypes, chat: action.Chat, warpLevel: action.WarpLevel, warpX: action.WarpX, warpY: action.WarpY, moveDX: action.MoveDX, moveDY: action.MoveDY, moveTime: action.MoveTime, moveOptions: action.MoveOptions})
 	}
 	for _, action := range result.SocketActions {
 		out.socketActions = append(out.socketActions, gs2VMSocketAction{action: action.Action, name: action.Name, id: action.ID, port: action.Port, data: action.Data, packageDelimiter: action.PackageDelimiter})
@@ -876,6 +881,7 @@ func (s *Server) applyGS2NPCAction(action gs2VMNPCAction) {
 	if npc == nil {
 		return
 	}
+	moved := action.moveDX != 0 || action.moveDY != 0 || action.moveTime != 0 || action.moveOptions != 0
 	npc.mu.Lock()
 	if action.shapeType > 0 {
 		npc.blockFlags = byte(action.shapeType)
@@ -885,13 +891,31 @@ func (s *Server) applyGS2NPCAction(action gs2VMNPCAction) {
 	if action.chat != "" {
 		npc.character.chatMessage = action.chat
 	}
+	if moved {
+		npc.x += int16(math.Round(action.moveDX * 16))
+		npc.y += int16(math.Round(action.moveDY * 16))
+	}
 	npc.mu.Unlock()
 	if strings.TrimSpace(action.warpLevel) != "" {
 		level := s.loadLevel(cleanLevelName(action.warpLevel))
 		s.warpDatabaseNPC(npc, level, int16(action.warpX), int16(action.warpY))
 		return
 	}
+	if moved {
+		s.sendNPCMovedToLevel(npc)
+	}
 	s.sendNPCPropsToLevel(npc)
+}
+
+func (s *Server) sendNPCMovedToLevel(npc *NPC) {
+	if npc == nil || npc.level == nil {
+		return
+	}
+	for _, id := range npc.level.getPlayers() {
+		if player, ok := s.players[id]; ok && player != nil && player.conn != nil {
+			player.sendPLO_NPCMOVED(npc.id, npc.x, npc.y)
+		}
+	}
 }
 
 func (s *Server) sendNPCPropsToLevel(npc *NPC) {
