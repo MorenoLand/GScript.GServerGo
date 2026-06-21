@@ -785,6 +785,48 @@ func TestApplyGS2NPCMoveActionUpdatesPosition(t *testing.T) {
 	}
 }
 
+func TestApplyGS2NPCActionAppliesCorePropsAndState(t *testing.T) {
+	server := newLoginTestServer(t)
+	level := NewLevel()
+	level.levelName = "levels/onlinestartlocal.nw"
+	level.actualLevelName = "onlinestartlocal.nw"
+	npc := NewNPC(DBNPC)
+	npc.id = 89
+	npc.level = level
+	level.npcs[npc.id] = npc
+	server.levels["onlinestartlocal.nw"] = level
+	if !server.AddNPC(npc) {
+		t.Fatal("failed to register test npc")
+	}
+
+	server.applyGS2NPCAction(gs2VMNPCAction{
+		id: npc.id,
+		props: map[string]string{
+			"image": "block.png",
+			"chat":  "hi",
+			"dir":   "1",
+			"head":  "head1.png",
+			"body":  "body.png",
+			"bombs": "4",
+		},
+		flags:         map[string]string{"canbecarried": "true", "canbepushed": "false"},
+		hasVisFlags:   true,
+		visFlags:      3,
+		hasBlockFlags: true,
+		blockFlags:    1,
+	})
+
+	if npc.image != "block.png" || npc.character.chatMessage != "hi" || npc.character.sprite != 1 || npc.character.headImage != "head1.png" || npc.character.bodyImage != "body.png" || npc.character.bombs != 4 {
+		t.Fatalf("npc props = image %q chat %q sprite %d head %q body %q bombs %d", npc.image, npc.character.chatMessage, npc.character.sprite, npc.character.headImage, npc.character.bodyImage, npc.character.bombs)
+	}
+	if npc.visFlags != 3 || npc.blockFlags != 1 {
+		t.Fatalf("npc flags = vis %d block %d", npc.visFlags, npc.blockFlags)
+	}
+	if npc.flagList["canbecarried"] != "true" || npc.flagList["canbepushed"] != "false" {
+		t.Fatalf("npc flagList = %#v", npc.flagList)
+	}
+}
+
 func TestSnapshotGS2PlayerUsesPCIDForGuestAccount(t *testing.T) {
 	player := &Player{}
 	player.accountName = "guest"
@@ -7995,6 +8037,12 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	npc.script = "message hi;"
 	npc.npcName = "guide"
 	npc.character.gani = "idle"
+	npc.character.bombs = 4
+	npc.character.sprite = 1
+	npc.visFlags = 3
+	npc.blockFlags = 1
+	npc.character.headImage = "head1.png"
+	npc.character.bodyImage = "body.png"
 
 	done := make(chan struct{}, 1)
 	go func() {
@@ -8017,6 +8065,14 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	want = append(want, []byte(npc.npcName)...)
 	want = append(want, NPCPROP_GANI+32, byte(len(npc.character.gani))+32)
 	want = append(want, []byte(npc.character.gani)...)
+	want = append(want, NPCPROP_BOMBS+32, byte(npc.character.bombs)+32)
+	want = append(want, NPCPROP_VISFLAGS+32, npc.visFlags+32)
+	want = append(want, NPCPROP_BLOCKFLAGS+32, npc.blockFlags+32)
+	want = append(want, NPCPROP_SPRITE+32, npc.character.sprite+32)
+	want = append(want, NPCPROP_HEADIMAGE+32, byte(len(npc.character.headImage))+32)
+	want = append(want, []byte(npc.character.headImage)...)
+	want = append(want, NPCPROP_BODYIMAGE+32, byte(len(npc.character.bodyImage))+32)
+	want = append(want, []byte(npc.character.bodyImage)...)
 	want = append(want, '\n')
 
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))

@@ -20,7 +20,7 @@ This documents implemented behavior only. Planned parity work belongs in issues 
 | `player`, `client`, `clientr`, `server`, `serverr`, `serveroptions` | [Globals And API](GS2VM_API.md) |
 | `findplayer`, `sendpm`, `setlevel2`, `addweapon` | [Globals And API](GS2VM_API.md) |
 | `loadstring`, `loadlines`, `savestring`, `findfiles` | [Globals And API](GS2VM_API.md) |
-| `setshape`, `setshape2`, `warpto`, `triggerclient` | [Globals And API](GS2VM_API.md) |
+| `setshape`, `setshape2`, `move`, `warpto`, `triggerclient` | [Globals And API](GS2VM_API.md) |
 | socket bind/send/events | [Globals And API](GS2VM_API.md) |
 | script loading, class expansion, result application | [GServer Integration](GS2VM_GSERVER.md) |
 

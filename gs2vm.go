@@ -85,19 +85,26 @@ type gs2VMNPCFunctionCall struct {
 }
 
 type gs2VMNPCAction struct {
-	id          uint32
-	shapeType   int
-	width       int
-	height      int
-	tileTypes   []string
-	chat        string
-	warpLevel   string
-	warpX       float64
-	warpY       float64
-	moveDX      float64
-	moveDY      float64
-	moveTime    float64
-	moveOptions int
+	id            uint32
+	shapeType     int
+	width         int
+	height        int
+	tileTypes     []string
+	chat          string
+	warpLevel     string
+	warpX         float64
+	warpY         float64
+	moveDX        float64
+	moveDY        float64
+	moveTime      float64
+	moveOptions   int
+	props         map[string]string
+	flags         map[string]string
+	visFlags      int
+	hasVisFlags   bool
+	blockFlags    int
+	hasBlockFlags bool
+	destroy       bool
 }
 
 type gs2VMSocketAction struct {
@@ -200,7 +207,7 @@ func (s *Server) runServerSideGS2NativeWithStateAndSocket(scriptType, scriptName
 		out.npcFunctionCalls = append(out.npcFunctionCalls, gs2VMNPCFunctionCall{id: call.ID, name: call.Name, function: call.Function, args: call.Args})
 	}
 	for _, action := range result.NPCActions {
-		out.npcActions = append(out.npcActions, gs2VMNPCAction{id: action.ID, shapeType: action.ShapeType, width: action.Width, height: action.Height, tileTypes: action.TileTypes, chat: action.Chat, warpLevel: action.WarpLevel, warpX: action.WarpX, warpY: action.WarpY, moveDX: action.MoveDX, moveDY: action.MoveDY, moveTime: action.MoveTime, moveOptions: action.MoveOptions})
+		out.npcActions = append(out.npcActions, gs2VMNPCAction{id: action.ID, shapeType: action.ShapeType, width: action.Width, height: action.Height, tileTypes: action.TileTypes, chat: action.Chat, warpLevel: action.WarpLevel, warpX: action.WarpX, warpY: action.WarpY, moveDX: action.MoveDX, moveDY: action.MoveDY, moveTime: action.MoveTime, moveOptions: action.MoveOptions, props: action.Props, flags: action.Flags, visFlags: action.VisFlags, hasVisFlags: action.HasVisFlags, blockFlags: action.BlockFlags, hasBlockFlags: action.HasBlockFlags, destroy: action.Destroy})
 	}
 	for _, action := range result.SocketActions {
 		out.socketActions = append(out.socketActions, gs2VMSocketAction{action: action.Action, name: action.Name, id: action.ID, port: action.Port, data: action.Data, packageDelimiter: action.PackageDelimiter})
@@ -891,11 +898,34 @@ func (s *Server) applyGS2NPCAction(action gs2VMNPCAction) {
 	if action.chat != "" {
 		npc.character.chatMessage = action.chat
 	}
+	s.applyGS2NPCPropsLocked(npc, action.props)
+	if action.hasVisFlags {
+		npc.visFlags = byte(action.visFlags)
+	}
+	if action.hasBlockFlags {
+		npc.blockFlags = byte(action.blockFlags)
+	}
+	if len(action.flags) > 0 {
+		if npc.flagList == nil {
+			npc.flagList = make(map[string]string)
+		}
+		if npc.vmThis == nil {
+			npc.vmThis = make(map[string]any)
+		}
+		for key, value := range action.flags {
+			npc.flagList[key] = value
+			npc.vmThis[key] = value
+		}
+	}
 	if moved {
 		npc.x += int16(math.Round(action.moveDX * 16))
 		npc.y += int16(math.Round(action.moveDY * 16))
 	}
 	npc.mu.Unlock()
+	if action.destroy {
+		s.DeleteNPC(npc.id)
+		return
+	}
 	if strings.TrimSpace(action.warpLevel) != "" {
 		level := s.loadLevel(cleanLevelName(action.warpLevel))
 		s.warpDatabaseNPC(npc, level, int16(action.warpX), int16(action.warpY))
@@ -905,6 +935,54 @@ func (s *Server) applyGS2NPCAction(action gs2VMNPCAction) {
 		s.sendNPCMovedToLevel(npc)
 	}
 	s.sendNPCPropsToLevel(npc)
+}
+
+func (s *Server) applyGS2NPCPropsLocked(npc *NPC, props map[string]string) {
+	for key, value := range props {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "image":
+			npc.image = value
+		case "chat", "message":
+			npc.character.chatMessage = value
+		case "ani", "gani":
+			npc.character.gani = value
+		case "dir":
+			npc.character.sprite = uint8(parseGS2Int(value))
+			npc.sprite = byte(parseGS2Int(value))
+		case "head":
+			npc.character.headImage = value
+		case "body":
+			npc.character.bodyImage = value
+		case "sword":
+			npc.character.swordImage = value
+		case "shield":
+			npc.character.shieldImage = value
+		case "horse":
+			npc.character.horseImage = value
+		case "hearts":
+			npc.character.hitpoints = int(parseGS2Float(value))
+		case "gralats":
+			npc.character.gralats = parseGS2Int(value)
+		case "arrows":
+			npc.character.arrows = parseGS2Int(value)
+		case "bombs":
+			npc.character.bombs = parseGS2Int(value)
+		case "glovepower":
+			npc.character.glovePower = parseGS2Int(value)
+		case "ap":
+			npc.character.ap = parseGS2Int(value)
+		}
+	}
+}
+
+func parseGS2Int(value string) int {
+	i, _ := strconv.Atoi(strings.TrimSpace(value))
+	return i
+}
+
+func parseGS2Float(value string) float64 {
+	f, _ := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	return f
 }
 
 func (s *Server) sendNPCMovedToLevel(npc *NPC) {

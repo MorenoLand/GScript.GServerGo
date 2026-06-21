@@ -3905,6 +3905,36 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	if npc.character.gani != "" {
 		buf.WriteGChar(NPCPROP_GANI).WriteGChar(byte(len(npc.character.gani))).Write([]byte(npc.character.gani))
 	}
+	if npc.character.arrows != 0 {
+		buf.WriteGChar(NPCPROP_ARROWS).WriteGChar(byte(npc.character.arrows))
+	}
+	if npc.character.bombs != 0 {
+		buf.WriteGChar(NPCPROP_BOMBS).WriteGChar(byte(npc.character.bombs))
+	}
+	if npc.character.glovePower != 0 {
+		buf.WriteGChar(NPCPROP_GLOVEPOWER).WriteGChar(byte(npc.character.glovePower))
+	}
+	if npc.character.gralats != 0 {
+		buf.WriteGChar(NPCPROP_RUPEES).WriteGInt(uint32(npc.character.gralats))
+	}
+	if npc.visFlags != 0 {
+		buf.WriteGChar(NPCPROP_VISFLAGS).WriteGChar(npc.visFlags)
+	}
+	if npc.blockFlags != 0 {
+		buf.WriteGChar(NPCPROP_BLOCKFLAGS).WriteGChar(npc.blockFlags)
+	}
+	if npc.character.sprite != 0 {
+		buf.WriteGChar(NPCPROP_SPRITE).WriteGChar(npc.character.sprite)
+	}
+	if npc.character.horseImage != "" {
+		buf.WriteGChar(NPCPROP_HORSEIMAGE).WriteGChar(byte(len(npc.character.horseImage))).Write([]byte(npc.character.horseImage))
+	}
+	if npc.character.headImage != "" {
+		buf.WriteGChar(NPCPROP_HEADIMAGE).WriteGChar(byte(len(npc.character.headImage))).Write([]byte(npc.character.headImage))
+	}
+	if npc.character.bodyImage != "" {
+		buf.WriteGChar(NPCPROP_BODYIMAGE).WriteGChar(byte(len(npc.character.bodyImage))).Write([]byte(npc.character.bodyImage))
+	}
 	if npc.character.chatMessage != "" {
 		msg := npc.character.chatMessage
 		if len(msg) > 255 {

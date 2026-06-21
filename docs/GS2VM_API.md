@@ -198,8 +198,23 @@ File operations are rooted to the configured VM file root and reject absolute pa
 - `setshape(shapeType, width, height)`
 - `setshape2(width, height, tileTypes)`
 - `warpto(level, x, y)`
+- `move(dx, dy, time, options)`
+- `hide()`
+- `show()`
+- `destroy()`
+- `dontblock()`
+- `blockagain()`
+- `drawoverplayer()`
+- `drawunderplayer()`
+- `drawaslight()`
+- `canbecarried()` / `cannotbecarried()`
+- `canbepulled()` / `cannotbepulled()`
+- `canbepushed()` / `cannotbepushed()`
+- `canwarp()` / `canwarp2()` / `cannotwarp()`
 
 These only emit NPC actions when the VM run has an NPC ID.
+
+Current NPC scripts can also set `this.image`, `this.chat`, `this.dir`, `this.ani`, `this.head`, `this.body`, `this.horseimg`, `this.hearts`, `this.gralats`, `this.arrows`, `this.bombs`, `this.darts`, `this.glovepower`, and `this.ap`. Bare `chat`, `image`, and the same property names are collected for the current NPC too.
 
 ## TSocket Functions And Objects
 
