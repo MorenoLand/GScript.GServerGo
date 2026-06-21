@@ -45,6 +45,7 @@ Server-side GS2 runtime notes for the NPC-server-backed VM. This document tracks
 - Simple GS2 array assignment literals such as `this.health = {5, 7};` are supported.
 - `new[size]` array construction is supported.
 - Classic `for (...)` loops and GS2 foreach loops using `for (temp.item : list)` or `for (temp.item in list)` are supported.
+- Dynamic function routing such as `(@funcname)(args...)` is supported.
 - `.size()` is translated to the host array/string length property.
 - Comma-separated server option values are exposed as list-like values for indexed access.
 
