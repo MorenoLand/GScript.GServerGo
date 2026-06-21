@@ -30,8 +30,9 @@ type gs2VMPlayerFlag struct {
 }
 
 type gs2VMServerFlag struct {
-	name  string
-	value string
+	name    string
+	value   string
+	deleted bool
 }
 
 type gs2VMPlayerMessage struct {
@@ -96,7 +97,7 @@ func (s *Server) runServerSideGS2NativeWithState(scriptType, scriptName, eventNa
 		out.playerFlags = append(out.playerFlags, gs2VMPlayerFlag{account: flag.Account, name: flag.Name, value: flag.Value})
 	}
 	for _, flag := range result.ServerFlags {
-		out.serverFlags = append(out.serverFlags, gs2VMServerFlag{name: flag.Name, value: flag.Value})
+		out.serverFlags = append(out.serverFlags, gs2VMServerFlag{name: flag.Name, value: flag.Value, deleted: flag.Deleted})
 	}
 	for _, message := range result.PlayerMessages {
 		out.playerMessages = append(out.playerMessages, gs2VMPlayerMessage{account: message.Account, message: message.Message})
@@ -431,7 +432,11 @@ func (s *Server) applyGS2VMResult(result gs2VMResult) {
 		return
 	}
 	for _, flag := range result.serverFlags {
-		s.SetFlag(flag.name, flag.value)
+		if flag.deleted {
+			s.DeleteServerFlagLive(flag.name)
+		} else {
+			s.SetServerFlagLive(flag.name, flag.value)
+		}
 	}
 	for _, flag := range result.playerFlags {
 		if player := s.findGS2Player(flag.account); player != nil {

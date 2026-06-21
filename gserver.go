@@ -1062,6 +1062,34 @@ func (s *Server) SetFlag(name, value string) {
 	s.flagMu.Unlock()
 }
 func (s *Server) DeleteFlag(name string) { s.flagMu.Lock(); delete(s.flags, name); s.flagMu.Unlock() }
+func (s *Server) SetServerFlagLive(name, value string) {
+	if !isValidServerFlag(name, value) {
+		return
+	}
+	s.SetFlag(name, value)
+	s.broadcastServerFlagSet(name, value)
+}
+func (s *Server) DeleteServerFlagLive(name string) {
+	if !isValidServerFlag(name, "") {
+		return
+	}
+	s.DeleteFlag(name)
+	s.broadcastServerFlagDelete(name)
+}
+func (s *Server) broadcastServerFlagSet(name, value string) {
+	for _, player := range s.GetAllPlayers() {
+		if player.playerType == PLTYPE_CLIENT || player.playerType == PLTYPE_CLIENT2 || player.playerType == PLTYPE_CLIENT3 {
+			player.sendPLO_FLAGSET(name, value)
+		}
+	}
+}
+func (s *Server) broadcastServerFlagDelete(name string) {
+	for _, player := range s.GetAllPlayers() {
+		if player.playerType == PLTYPE_CLIENT || player.playerType == PLTYPE_CLIENT2 || player.playerType == PLTYPE_CLIENT3 {
+			player.sendPLO_FLAGDEL(name)
+		}
+	}
+}
 
 func (s *Server) AddPlayer(player *Player, id uint16) bool {
 	s.removeDuplicateControlSessions(player)

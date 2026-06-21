@@ -455,22 +455,12 @@ func (p *Player) msgPLI_RC_SERVERFLAGSSET(packet []byte) bool {
 	p.server.flagMu.Unlock()
 	for flag, value := range p.server.flags {
 		if oldValue, exists := oldFlags[flag]; !exists || oldValue != value {
-			buf2 := NewBuffer()
-			buf2.WriteByte(PLO_FLAGSET)
-			buf2.WriteString8(flag)
-			if value != "" {
-				buf2.WriteByte('=')
-				buf2.WriteString8(value)
-			}
-			p.server.sendBufferToType(PLTYPE_ANYCLIENT, buf2)
+			p.server.broadcastServerFlagSet(flag, value)
 		}
 	}
 	for flag := range oldFlags {
 		if _, exists := p.server.flags[flag]; !exists {
-			buf2 := NewBuffer()
-			buf2.WriteByte(PLO_FLAGDEL)
-			buf2.WriteString8(flag)
-			p.server.sendBufferToType(PLTYPE_ANYCLIENT, buf2)
+			p.server.broadcastServerFlagDelete(flag)
 		}
 	}
 	p.server.saveFlags()

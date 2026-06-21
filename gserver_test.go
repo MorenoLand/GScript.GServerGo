@@ -250,6 +250,40 @@ func TestServerSideGS2AppliesServerFlagMutations(t *testing.T) {
 	}
 }
 
+func TestServerSideGS2BroadcastsServerFlagMutations(t *testing.T) {
+	server := newLoginTestServer(t)
+	enableTestNPCServer(server)
+	server.SetFlag("server.old", "1")
+	weapon := &Weapon{name: "-flags", script: `function onActionServerside() {
+		server.foo = "bar";
+		delete server.old;
+	}`}
+	server.AddWeapon(weapon)
+	player := NewPlayer(nil, server)
+	player.id = 2
+	player.playerType = PLTYPE_CLIENT3
+	player.accountName = "moondeath"
+	server.players[player.id] = player
+	receiver := NewPlayer(nil, server)
+	receiver.id = 3
+	receiver.playerType = PLTYPE_CLIENT3
+	receiver.accountName = "bob"
+	receiver.queueOutgoing = true
+	receiver.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[receiver.id] = receiver
+
+	server.runServerSideWeaponEventForPlayer(weapon, "onActionServerside", player)
+
+	wantSet := append([]byte{PLO_FLAGSET + 32}, []byte("server.foo=bar")...)
+	wantDel := append([]byte{PLO_FLAGDEL + 32}, []byte("server.old")...)
+	if !bytes.Contains(receiver.outQueue, wantSet) || !bytes.Contains(receiver.outQueue, wantDel) {
+		t.Fatalf("receiver flags = % X want set % X del % X", receiver.outQueue, wantSet, wantDel)
+	}
+	if server.GetFlag("server.old") != "" {
+		t.Fatalf("server.old still set to %q", server.GetFlag("server.old"))
+	}
+}
+
 func TestServerSideGS2FileFunctionsUseServerBasePath(t *testing.T) {
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
@@ -3414,6 +3448,34 @@ func TestRCServerFlagsGetUsesSingleString8Length(t *testing.T) {
 	want = append(want, '\n')
 	if !bytes.Equal(rc.outQueue, want) {
 		t.Fatalf("server flags packet = % X, want % X", rc.outQueue, want)
+	}
+}
+
+func TestRCServerFlagsSetBroadcastsLiveFlagPackets(t *testing.T) {
+	server := newLoginTestServer(t)
+	server.SetFlag("server.old", "1")
+	receiver := NewPlayer(nil, server)
+	receiver.id = 3
+	receiver.playerType = PLTYPE_CLIENT3
+	receiver.queueOutgoing = true
+	receiver.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[receiver.id] = receiver
+	rc := NewPlayer(nil, server)
+	rc.playerType = PLTYPE_RC2
+	rc.accountName = "Admin"
+	rc.adminRights = PLPERM_SETSERVERFLAGS
+
+	packet := NewBuffer()
+	packet.WriteByte(PLI_RC_SERVERFLAGSSET).WriteGShort(1)
+	writeRCEncodedString(packet, "server.foo=bar")
+	if !rc.msgPLI_RC_SERVERFLAGSSET(packet.Bytes()) {
+		t.Fatal("msgPLI_RC_SERVERFLAGSSET returned false")
+	}
+
+	wantSet := append([]byte{PLO_FLAGSET + 32}, []byte("server.foo=bar")...)
+	wantDel := append([]byte{PLO_FLAGDEL + 32}, []byte("server.old")...)
+	if !bytes.Contains(receiver.outQueue, wantSet) || !bytes.Contains(receiver.outQueue, wantDel) {
+		t.Fatalf("receiver flags = % X want set % X del % X", receiver.outQueue, wantSet, wantDel)
 	}
 }
 
