@@ -223,6 +223,15 @@ func TestRunServerSideGS2ExportsServerFlagsAndOptions(t *testing.T) {
 	}
 }
 
+func TestApplyGS2VMResultSkipsStaleScheduledWeaponEvent(t *testing.T) {
+	server := &Server{weapons: map[string]*Weapon{"-loop": {name: "-loop", script: `function onKek(){ server.stale = "bad"; }`, vmRevision: 1}}}
+	server.applyGS2VMResult(gs2VMResult{scriptType: "weapon", scriptName: "-loop", script: `function onKek(){ server.stale = "bad"; }`, vmRevision: 0, scheduledEvents: []gs2VMScheduledEvent{{event: "Kek", delay: 0}}})
+	time.Sleep(25 * time.Millisecond)
+	if server.flags != nil && server.flags["server.stale"] != "" {
+		t.Fatalf("stale scheduled event mutated server flags: %#v", server.flags)
+	}
+}
+
 func TestServerSideGS2AppliesServerFlagMutations(t *testing.T) {
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)

@@ -66,6 +66,7 @@ type Server struct {
 	serverList       *ServerList
 	serverLists      []*ServerList
 	npcServer        *NPCServer
+	gs2Sockets       *GS2SocketManager
 	triggerCommands  map[string]func(*Player, []string) bool
 	serverMessage    string
 	serverTime       uint
@@ -99,6 +100,7 @@ func NewServer(name string) *Server {
 	s.serverList = NewServerList(s)
 	s.serverLists = []*ServerList{s.serverList}
 	s.npcServer = NewNPCServer(s)
+	s.gs2Sockets = NewGS2SocketManager(s)
 	s.triggerCommands = make(map[string]func(*Player, []string) bool)
 	s.initTriggerCommands()
 	s.wordFilter = &WordFilter{server: s}
@@ -161,6 +163,9 @@ func (s *Server) Stop() {
 		s.listener.Close()
 	}
 	s.socketMgr.Cleanup()
+	if s.gs2Sockets != nil {
+		s.gs2Sockets.CloseAll()
+	}
 	s.logger.Info("Server stopped")
 }
 
@@ -3900,6 +3905,13 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	if npc.character.gani != "" {
 		buf.WriteGChar(NPCPROP_GANI).WriteGChar(byte(len(npc.character.gani))).Write([]byte(npc.character.gani))
 	}
+	if npc.character.chatMessage != "" {
+		msg := npc.character.chatMessage
+		if len(msg) > 255 {
+			msg = msg[:255]
+		}
+		buf.WriteGChar(NPCPROP_MESSAGE).WriteGChar(byte(len(msg))).Write([]byte(msg))
+	}
 	p.send(buf)
 	return true
 }
@@ -5751,6 +5763,7 @@ func (p *Player) msgPLI_TRIGGERACTION(packet []byte) bool {
 	if p.server.handleTriggerCommand(p, command, parts) {
 		return true
 	}
+	p.server.runLevelNPCTriggerAction(p, npcId, int(x), int(y), parts)
 	if level, ok := p.server.levels[p.levelName]; ok {
 		for _, npc := range level.npcs {
 			if npc.script == action {
@@ -6910,6 +6923,7 @@ func (l *Level) loadNW(server *Server, levelName string) bool {
 			npc := &NPC{npcType: LEVELNPC, x: int16(npcx), y: int16(npcy), z: 0, image: image, script: script.String(), level: l, saves: [10]byte{}}
 			if server.AddNPC(npc) {
 				l.npcs[npc.id] = npc
+				server.runServerSideNPCEventForPlayer(npc, "onCreated", nil)
 			}
 		}
 	}
@@ -7269,6 +7283,7 @@ type Weapon struct {
 	bytecode            []byte
 	bytecodeFile        string
 	vmThis              map[string]any
+	vmRevision          int64
 	defPlayer           bool
 	modified            bool
 }

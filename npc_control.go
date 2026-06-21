@@ -161,6 +161,8 @@ func (p *Player) msgPLI_NC_NPCSCRIPTSET(packet []byte) bool {
 	npc := p.server.GetNPC(npcId)
 	if npc != nil {
 		npc.script = npcScript
+		npc.vmThis = nil
+		npc.vmRevision++
 		if err := p.server.saveDatabaseNPCFile(npc); err != nil {
 			p.server.logger.Warning("Failed to save NPC %s: %v", npc.npcName, err)
 		}
@@ -438,6 +440,7 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 		weapon.script = weaponCode
 		weapon.bytecode = compileResult.bytecode
 		weapon.vmThis = nil
+		weapon.vmRevision++
 		p.server.updateWeaponForPlayers(weapon)
 		actionTaken = "updated"
 	} else {

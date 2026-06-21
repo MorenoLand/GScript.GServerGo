@@ -403,6 +403,8 @@ func (n *NPCServer) reloadWeaponFromDisk(relPath string) {
 		existing.script = w.script
 		existing.bytecode = nil
 		existing.bytecodeFile = w.bytecodeFile
+		existing.vmThis = nil
+		existing.vmRevision++
 	} else {
 		n.host.weapons[strings.ToLower(w.name)] = w
 		existing = w

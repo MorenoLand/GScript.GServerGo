@@ -27,6 +27,7 @@ type NPC struct {
 	weaponName                    string
 	scriptData                    string
 	vmThis                        map[string]any
+	vmRevision                    int64
 	level                         *Level
 }
 
