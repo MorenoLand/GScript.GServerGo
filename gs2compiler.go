@@ -88,16 +88,18 @@ func createGS2BytecodeHeader(bytecode []byte, scriptType, scriptName string, sav
 		save = "1"
 	}
 	header := []byte(scriptType + "," + scriptName + "," + save + ",")
+	out := NewBuffer()
+	out.WriteGShort(uint16(len(header)))
+	out.Write(header)
 	key := make([]byte, 10)
 	if _, err := rand.Read(key); err != nil {
 		for i := range key {
 			key[i] = byte(time.Now().UnixNano() >> (i * 5))
 		}
 	}
-	header = append(header, key...)
-	out := NewBuffer()
-	out.WriteGShort(uint16(len(header)))
-	out.Write(header)
+	for _, v := range key {
+		out.WriteGChar(v)
+	}
 	out.Write(bytecode)
 	return out.Bytes()
 }

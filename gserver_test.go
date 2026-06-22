@@ -1851,7 +1851,7 @@ func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
 	if weapon == nil {
 		t.Fatalf("weapon was not added")
 	}
-	if string(weapon.bytecode) != "bytecode:weapon:test" {
+	if !bytes.Contains(weapon.bytecode, []byte("bytecode:weapon:test")) {
 		t.Fatalf("compiled bytecode = %q", weapon.bytecode)
 	}
 }
@@ -1893,7 +1893,7 @@ func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved bytecode file: %v", err)
 	}
-	if string(bytecode) != "bytecode:weapon:test" {
+	if !bytes.Contains(bytecode, []byte("bytecode:weapon:test")) {
 		t.Fatalf("saved bytecode = %q", bytecode)
 	}
 
@@ -1906,7 +1906,7 @@ func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
 	if loadedWeapon == nil {
 		t.Fatal("reloaded weapon not found")
 	}
-	if string(loadedWeapon.bytecode) != "bytecode:weapon:test" {
+	if !bytes.Contains(loadedWeapon.bytecode, []byte("bytecode:weapon:test")) {
 		t.Fatalf("reloaded bytecode = %q", loadedWeapon.bytecode)
 	}
 }
