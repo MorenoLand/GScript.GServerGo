@@ -333,6 +333,44 @@ func (p *Player) markMovement() {
 	p.lastMovement = time.Now()
 }
 
+func (p *Player) handleMovementFlag(name, value string) bool {
+	if p == nil || p.versionId >= 230 || !strings.HasPrefix(name, "gr.") {
+		return false
+	}
+	if p.server != nil && p.server.settings != nil && !p.server.settings.GetBool("flaghack_movement", true) {
+		return false
+	}
+	pos, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return false
+	}
+	props := NewBuffer()
+	switch name {
+	case "gr.x":
+		x := int16(pos * 16)
+		if x == p.x {
+			return true
+		}
+		props.WriteGChar(PLPROP_X).WriteGChar(byte(pos * 2))
+	case "gr.y":
+		y := int16(pos * 16)
+		if y == p.y {
+			return true
+		}
+		props.WriteGChar(PLPROP_Y).WriteGChar(byte(pos * 2))
+	case "gr.z":
+		z := int16(pos * 16)
+		if z == p.z {
+			return true
+		}
+		props.WriteGChar(PLPROP_Z).WriteGChar(byte(pos + 50.5))
+	default:
+		return false
+	}
+	p.msgPLI_PLAYERPROPS(append([]byte{PLI_PLAYERPROPS}, props.Bytes()...))
+	return true
+}
+
 func (p *Player) handlePlayerChatUnstickMe(originalChat string) bool {
 	if p.server == nil || p.server.settings == nil {
 		return false

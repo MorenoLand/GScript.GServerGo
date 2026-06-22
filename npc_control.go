@@ -427,8 +427,12 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 	weaponCode := buf.ReadString()
 	weaponCode = decodeNCScriptText(weaponCode)
 	compileResult := gs2CompileResult{}
-	if p.server.npcServerRunning() {
+	if p.server.npcServerRunning() && !clientsideScriptIsGS1(weaponCode) {
 		compileResult = p.server.compileGS2ForFeedback("weapon", weaponName, weaponCode)
+	}
+	if compileResult.errText != "" {
+		p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "error", compileResult.errText)
+		return true
 	}
 	actionTaken := ""
 	weapon := p.server.GetWeapon(weaponName)
@@ -459,10 +463,6 @@ func (p *Player) msgPLI_NC_WEAPONADD(packet []byte) bool {
 		logMsg := fmt.Sprintf("Weapon/GUI-script %s %s by %s", weaponName, actionTaken, p.accountName)
 		p.server.logger.Info(logMsg)
 		p.server.sendToNC(logMsg)
-		if compileResult.errText != "" {
-			p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "error", compileResult.errText)
-			return true
-		}
 		if compileResult.warningText != "" {
 			p.server.sendGS2CompilerOutputToNC("Weapon "+weaponName, "warning", compileResult.warningText)
 		}

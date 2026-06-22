@@ -4,8 +4,11 @@ IMAGE bcalarmclock.png
 BYTECODE weapon-tactachoe.gs2bc
 SCRIPT
 //function onCreated() echo("tits");
+//findplayer("pc:734").addweapon(this);
 //#CLIENTSIDE
+//#GS2
 function onCreated() {
+player.chat = 1;
   chat = "TicTacToe";
   this.difficulty = 0;
   loadingscreenenabled = false;

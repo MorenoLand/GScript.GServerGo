@@ -8058,14 +8058,14 @@ func TestPlayerPropsForwardPreciseMovementToModernPlayers(t *testing.T) {
 	wantX2.WriteGShort(64 * 8 * 2)
 	wantY2 := NewBuffer()
 	wantY2.WriteGShort(65 * 8 * 2)
+	want = append(want, PLPROP_X+32, byte(64)+32)
+	want = append(want, PLPROP_Y+32, byte(65)+32)
+	want = append(want, PLPROP_GANI+32, 4+32)
+	want = append(want, []byte("walk")...)
 	want = append(want, PLPROP_X2+32)
 	want = append(want, wantX2.Bytes()...)
 	want = append(want, PLPROP_Y2+32)
 	want = append(want, wantY2.Bytes()...)
-	want = append(want, PLPROP_GANI+32, 4+32)
-	want = append(want, []byte("walk")...)
-	want = append(want, PLPROP_X+32, byte(64)+32)
-	want = append(want, PLPROP_Y+32, byte(65)+32)
 	want = append(want, '\n')
 
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))
@@ -8136,6 +8136,57 @@ func TestLegacyPlayerPropsForwardCommonLegacyThenPreciseMovement(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("legacy player prop delta = % X, want % X", got, want)
+	}
+}
+
+func TestLegacyMovementFlagsForwardAsPlayerMovement(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	server := newLoginTestServer(t)
+	level := NewLevel()
+	level.levelName = "onlinestartlocal.nw"
+	server.levels[level.levelName] = level
+	p := &Player{id: 1, conn: serverConn, server: server, currentLevel: level, playerType: PLTYPE_CLIENT, versionId: 222, loaded: true, encryption: *NewEncryption()}
+	p.levelName = "onlinestartlocal.nw"
+	other := &Player{id: 2, conn: serverConn, server: server, currentLevel: level, playerType: PLTYPE_CLIENT3, versionId: 611, encryption: *NewEncryption()}
+	other.levelName = "onlinestartlocal.nw"
+	other.encryption.SetGen(ENCRYPT_GEN_1)
+	server.players[p.id] = p
+	server.players[other.id] = other
+	level.players = []uint16{p.id, other.id}
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.msgPLI_FLAGSET(append([]byte{PLI_FLAGSET}, []byte("gr.x=31.5")...))
+		done <- struct{}{}
+	}()
+
+	id := NewBuffer()
+	id.WriteGShort(p.id)
+	wantX2 := NewBuffer()
+	wantX2.WriteGShort(uint16(31.5 * 16 * 2))
+	want := append([]byte{PLO_OTHERPLPROPS + 32}, id.Bytes()...)
+	want = append(want, PLPROP_X+32, byte(63)+32, PLPROP_X2+32)
+	want = append(want, wantX2.Bytes()...)
+	want = append(want, '\n')
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read gr movement delta: %v", err)
+	}
+	<-done
+
+	if string(got) != string(want) {
+		t.Fatalf("gr movement delta = % X, want % X", got, want)
+	}
+	if p.x != int16(31.5*16) {
+		t.Fatalf("x = %d, want %d", p.x, int16(31.5*16))
+	}
+	if _, ok := p.flagList["gr.x"]; ok {
+		t.Fatalf("gr.x flag was stored")
 	}
 }
 
@@ -8526,6 +8577,7 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 		conn:       serverConn,
 		server:     &Server{logger: NewLogger("", false)},
 		encryption: *NewEncryption(),
+		versionId:  230,
 	}
 	p.encryption.SetGen(ENCRYPT_GEN_1)
 
@@ -8560,14 +8612,13 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	scriptLen.WriteGShort(uint16(len(npcScript)))
 	npcX2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.x)).Bytes()
 	npcY2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.y)).Bytes()
-	npcZ2 := NewBuffer().WriteGShort(encodeSignedGShortCoord(npc.z)).Bytes()
 	want := append([]byte{PLO_NPCPROPS + 32}, npcID.Bytes()...)
 	want = append(want, NPCPROP_IMAGE+32, byte(len(npc.image))+32)
 	want = append(want, []byte(npc.image)...)
 	want = append(want, NPCPROP_SCRIPT+32)
 	want = append(want, scriptLen.Bytes()...)
 	want = append(want, []byte(npcScript)...)
-	want = append(want, NPCPROP_X+32, byte(npc.x/8)+32, NPCPROP_Y+32, byte(npc.y/8)+32, NPCPROP_Z+32, byte(50)+32)
+	want = append(want, NPCPROP_X+32, byte(npc.x/8)+32, NPCPROP_Y+32, byte(npc.y/8)+32)
 	want = append(want, NPCPROP_VISFLAGS+32, npc.visFlags+32)
 	want = append(want, NPCPROP_ID+32)
 	want = append(want, npcID.Bytes()...)
@@ -8586,12 +8637,11 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 	want = append(want, []byte(npc.character.headImage)...)
 	want = append(want, NPCPROP_BODYIMAGE+32, byte(len(npc.character.bodyImage))+32)
 	want = append(want, []byte(npc.character.bodyImage)...)
+	want = append(want, NPCPROP_GMAPLEVELX+32, 0+32, NPCPROP_GMAPLEVELY+32, 0+32)
 	want = append(want, NPCPROP_X2+32)
 	want = append(want, npcX2...)
 	want = append(want, NPCPROP_Y2+32)
 	want = append(want, npcY2...)
-	want = append(want, NPCPROP_Z2+32)
-	want = append(want, npcZ2...)
 	want = append(want, '\n')
 
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))
@@ -8603,6 +8653,72 @@ func TestNpcPropsUseTypedPropertyStream(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("npc props packet = % X, want % X", got, want)
+	}
+}
+
+func TestNpcPropsInjectsIdleGaniForCharacterNPC(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{conn: serverConn, server: &Server{logger: NewLogger("", false)}, encryption: *NewEncryption(), versionId: 222}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+	npc := NewNPC(LEVELNPC)
+	npc.id = 9
+	npc.image = "#c#"
+	npc.character.nickName = "Bob"
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendPLO_NPCPROPS(npc)
+		done <- struct{}{}
+	}()
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, 256)
+	n, err := clientConn.Read(got)
+	if err != nil {
+		t.Fatalf("read npc props packet: %v", err)
+	}
+	<-done
+	got = got[:n]
+	want := []byte{NPCPROP_GANI + 32, 4 + 32, 'i', 'd', 'l', 'e'}
+	if !bytes.Contains(got, want) {
+		t.Fatalf("character npc props missing idle gani: % X", got)
+	}
+}
+
+func TestNpcPropsFor222OmitsPreciseTail(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{conn: serverConn, server: &Server{logger: NewLogger("", false)}, encryption: *NewEncryption(), versionId: 222}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+	npc := NewNPC(LEVELNPC)
+	npc.id = 10
+	npc.image = "chest.png"
+	npc.x = 30 * 16
+	npc.y = 30 * 16
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendPLO_NPCPROPS(npc)
+		done <- struct{}{}
+	}()
+
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, 256)
+	n, err := clientConn.Read(got)
+	if err != nil {
+		t.Fatalf("read npc props packet: %v", err)
+	}
+	<-done
+	got = got[:n]
+	for _, prop := range []byte{NPCPROP_GMAPLEVELX, NPCPROP_GMAPLEVELY, NPCPROP_X2, NPCPROP_Y2, NPCPROP_Z2} {
+		if bytes.Contains(got, []byte{prop + 32}) {
+			t.Fatalf("2.22 npc props included new prop %d: % X", prop, got)
+		}
 	}
 }
 
@@ -8638,6 +8754,83 @@ func TestNpcPropsZeroScriptForModernClients(t *testing.T) {
 	want := []byte{NPCPROP_SCRIPT + 32, 32, 32}
 	if !bytes.Contains(got, want) {
 		t.Fatalf("modern npc props script length = % X, want zero-length marker % X", got, want)
+	}
+}
+
+func TestSendWeaponOmitsGS2TextFor222(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{conn: serverConn, server: &Server{logger: NewLogger("", false)}, encryption: *NewEncryption(), versionId: 222}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+	weapon := &Weapon{name: "-gr_movement", image: "wbomb1.png", script: "//#CLIENTSIDE\nfunction onCreated() { chat = \"ok\"; }\n"}
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendWeapon(weapon)
+		done <- struct{}{}
+	}()
+
+	want := []byte{PLO_NPCWEAPONADD + 32, byte(len(weapon.name)) + 32}
+	want = append(want, []byte(weapon.name)...)
+	want = append(want, NPCPROP_IMAGE+32, byte(len(weapon.image))+32)
+	want = append(want, []byte(weapon.image)...)
+	want = append(want, '\n')
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read weapon packet: %v", err)
+	}
+	<-done
+	if string(got) != string(want) {
+		t.Fatalf("2.22 weapon packet = % X, want % X", got, want)
+	}
+}
+
+func TestSendWeaponSendsGS1TextFor222(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	p := &Player{conn: serverConn, server: &Server{logger: NewLogger("", false)}, encryption: *NewEncryption(), versionId: 222}
+	p.encryption.SetGen(ENCRYPT_GEN_1)
+	weapon := &Weapon{name: "-gr_movement", image: "wbomb1.png", script: "//#CLIENTSIDE\n//#GS1\nif (playerenters || timeout) {\n  if (!gr.x.off) setstring gr.x,#v(int((playerx+0.25)*2)/2);\n}\n"}
+
+	done := make(chan struct{}, 1)
+	go func() {
+		p.sendWeapon(weapon)
+		done <- struct{}{}
+	}()
+
+	script, ok := formatClientsideWeaponScript(weapon.script)
+	if !ok {
+		t.Fatalf("formatClientsideWeaponScript returned false")
+	}
+	scriptLen := NewBuffer()
+	scriptLen.WriteGShort(uint16(len(script)))
+	want := []byte{PLO_NPCWEAPONADD + 32, byte(len(weapon.name)) + 32}
+	want = append(want, []byte(weapon.name)...)
+	want = append(want, NPCPROP_IMAGE+32, byte(len(weapon.image))+32)
+	want = append(want, []byte(weapon.image)...)
+	want = append(want, NPCPROP_SCRIPT+32)
+	want = append(want, scriptLen.Bytes()...)
+	want = append(want, []byte(script)...)
+	want = append(want, '\n')
+	clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(clientConn, got); err != nil {
+		t.Fatalf("read weapon packet: %v", err)
+	}
+	<-done
+	if string(got) != string(want) {
+		t.Fatalf("2.22 gs1 weapon packet = % X, want % X", got, want)
+	}
+}
+
+func TestClientsideGS1MarkerSkipsGS2Compiler(t *testing.T) {
+	if _, ok := clientsideGS2("//#CLIENTSIDE\n//#GS1\nsetstring gr.x,#v(playerx);"); ok {
+		t.Fatalf("GS1 clientside script was accepted as GS2")
 	}
 }
 
@@ -9092,30 +9285,28 @@ func TestSendWeaponSendsBytecodeWithoutSourceForModernClients(t *testing.T) {
 	}
 	p.encryption.SetGen(ENCRYPT_GEN_1)
 
-	weapon := &Weapon{name: "-gr_movement", image: "wbomb1.png", script: "//#CLIENTSIDE\nfunction onCreated(){ triggerServer(\"gui\", name, \"x\"); }", bytecode: []byte{0x01, 0x02, 0x03}}
+	weapon := &Weapon{name: "-gr_movement", image: "wbomb1.png", script: "//#CLIENTSIDE\nfunction onCreated(){ triggerServer(\"gui\", name, \"x\"); }"}
+	weapon.bytecode = createGS2BytecodeHeader([]byte{0x01, 0x02, 0x03}, "weapon", weapon.name, true)
 	done := make(chan struct{}, 1)
 	go func() {
 		p.sendWeapon(weapon)
 		done <- struct{}{}
 	}()
 
-	add := []byte{PLO_NPCWEAPONADD + 32, byte(len(weapon.name)) + 32}
-	add = append(add, []byte(weapon.name)...)
-	add = append(add, NPCPROP_IMAGE+32, byte(len(weapon.image))+32)
-	add = append(add, []byte(weapon.image)...)
-	add = append(add, '\n')
-	raw := []byte{PLO_RAWDATA + 32, 0x20, 0x20, 0x24, '\n', PLO_NPCWEAPONSCRIPT + 32, 0x01, 0x02, 0x03}
-	want := append(add, raw...)
-
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))
-	got := make([]byte, len(want))
-	if _, err := io.ReadFull(clientConn, got); err != nil {
+	got := make([]byte, 256)
+	n, err := clientConn.Read(got)
+	if err != nil {
 		t.Fatalf("read weapon bytecode packets: %v", err)
 	}
 	<-done
+	got = got[:n]
 
-	if string(got) != string(want) {
-		t.Fatalf("weapon bytecode packets = % X, want % X", got, want)
+	if !bytes.Contains(got, []byte{PLO_UNKNOWN197 + 32}) {
+		t.Fatalf("weapon bytecode packet missing header advertisement: % X", got)
+	}
+	if bytes.Contains(got, []byte{PLO_RAWDATA + 32}) {
+		t.Fatalf("weapon add should not push raw bytecode immediately: % X", got)
 	}
 }
 
@@ -9793,7 +9984,7 @@ func TestUpdateScriptWrapsBytecodeInRawData(t *testing.T) {
 	packet := append([]byte{PLI_UPDATESCRIPT}, []byte("-test")...)
 	payload := append([]byte{PLO_NPCWEAPONSCRIPT + 32}, bytecode...)
 	expectedLen := NewBuffer()
-	expectedLen.WriteGInt(uint32(len(payload)))
+	expectedLen.WriteGInt(uint32(len(bytecode)))
 	want := append([]byte{PLO_RAWDATA + 32}, expectedLen.Bytes()...)
 	want = append(want, '\n')
 	want = append(want, payload...)

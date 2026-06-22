@@ -859,6 +859,9 @@ func (s *Server) ensureWeaponBytecode(weapon *Weapon) {
 	if !s.npcServerRunning() {
 		return
 	}
+	if clientsideScriptIsGS1(weapon.script) {
+		return
+	}
 	if _, ok := clientsideGS2(weapon.script); !ok {
 		return
 	}
@@ -3899,13 +3902,15 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(scriptLen)).Write([]byte(script[:scriptLen]))
 	buf.WriteGChar(NPCPROP_X).WriteGChar(byte(npc.x / 8))
 	buf.WriteGChar(NPCPROP_Y).WriteGChar(byte(npc.y / 8))
-	zTile := npc.z / 16
-	if zTile < -50 {
-		zTile = -50
-	} else if zTile > 170 {
-		zTile = 170
+	if npc.z != 0 {
+		zTile := npc.z / 16
+		if zTile < -50 {
+			zTile = -50
+		} else if zTile > 170 {
+			zTile = 170
+		}
+		buf.WriteGChar(NPCPROP_Z).WriteGChar(byte(zTile + 50))
 	}
-	buf.WriteGChar(NPCPROP_Z).WriteGChar(byte(zTile + 50))
 	visFlags := npc.visFlags
 	if visFlags == 0 && (npc.image != "" || npc.script != "") {
 		visFlags = NPCVISFLAG_VISIBLE
@@ -3925,8 +3930,12 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	if nick != "" {
 		buf.WriteGChar(NPCPROP_NICKNAME).WriteGChar(byte(len(nick))).Write([]byte(nick))
 	}
-	if npc.character.gani != "" {
-		buf.WriteGChar(NPCPROP_GANI).WriteGChar(byte(len(npc.character.gani))).Write([]byte(npc.character.gani))
+	gani := npc.character.gani
+	if gani == "" && npc.image == "#c#" && (p.versionId == 0 || p.versionId > 141) {
+		gani = "idle"
+	}
+	if gani != "" {
+		buf.WriteGChar(NPCPROP_GANI).WriteGChar(byte(len(gani))).Write([]byte(gani))
 	}
 	if npc.character.arrows != 0 {
 		buf.WriteGChar(NPCPROP_ARROWS).WriteGChar(byte(npc.character.arrows))
@@ -3968,9 +3977,15 @@ func (p *Player) sendPLO_NPCPROPS(npc *NPC) bool {
 	if npc.character.bodyImage != "" {
 		buf.WriteGChar(NPCPROP_BODYIMAGE).WriteGChar(byte(len(npc.character.bodyImage))).Write([]byte(npc.character.bodyImage))
 	}
-	buf.WriteGChar(NPCPROP_X2).WriteGShort(encodeSignedGShortCoord(npc.x))
-	buf.WriteGChar(NPCPROP_Y2).WriteGShort(encodeSignedGShortCoord(npc.y))
-	buf.WriteGChar(NPCPROP_Z2).WriteGShort(encodeSignedGShortCoord(npc.z))
+	if p.versionId >= 230 {
+		buf.WriteGChar(NPCPROP_GMAPLEVELX).WriteGChar(0)
+		buf.WriteGChar(NPCPROP_GMAPLEVELY).WriteGChar(0)
+		buf.WriteGChar(NPCPROP_X2).WriteGShort(encodeSignedGShortCoord(npc.x))
+		buf.WriteGChar(NPCPROP_Y2).WriteGShort(encodeSignedGShortCoord(npc.y))
+		if npc.z != 0 {
+			buf.WriteGChar(NPCPROP_Z2).WriteGShort(encodeSignedGShortCoord(npc.z))
+		}
+	}
 	p.send(buf)
 	return true
 }
@@ -4266,24 +4281,39 @@ func (p *Player) sendWeapon(weapon *Weapon) bool {
 		return false
 	}
 	scriptsEnabled := p.server != nil && p.server.npcServerRunning()
-	sendBytecode := scriptsEnabled && len(weapon.bytecode) > 0 && p.supportsRawWeaponScript()
+	sendBytecode := false
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCWEAPONADD)
 	buf.WriteGChar(byte(len(weapon.name))).Write([]byte(weapon.name))
 	if weapon.image != "" {
 		buf.WriteGChar(NPCPROP_IMAGE).WriteGChar(byte(len(weapon.image))).Write([]byte(weapon.image))
 	}
-	if scriptsEnabled && !sendBytecode {
+	if scriptsEnabled && !sendBytecode && p.supportsTextWeaponScript(weapon.script) {
 		if script, ok := formatClientsideWeaponScript(weapon.script); ok {
 			buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(len(script))).Write([]byte(script))
 		}
 	}
-	p.send(buf)
 	if sendBytecode {
-		p.server.logger.Debug("sendWeapon: sending bytecode for %s (%d bytes)", weapon.name, len(weapon.bytecode))
-		p.sendRawNpcWeaponScript(weapon.bytecode)
+		header, ok := gs2BytecodeHeader(weapon.bytecode)
+		if ok {
+			buf.WriteGChar(NPCPROP_CLASS).WriteGShort(0).WriteByte('\n')
+			buf.WriteGChar(PLO_UNKNOWN197).Write(header).WriteByte(',').WriteGInt5(uint64(time.Now().Unix())).WriteByte('\n')
+		}
 	}
+	p.send(buf)
 	return true
+}
+
+func gs2BytecodeHeader(bytecode []byte) ([]byte, bool) {
+	if len(bytecode) < 2 {
+		return nil, false
+	}
+	buf := NewBufferFromBytes(bytecode)
+	headerLen := int(buf.ReadGShort())
+	if headerLen <= 0 || headerLen > buf.BytesLeft() {
+		return nil, false
+	}
+	return buf.ReadBytes(headerLen), true
 }
 
 func formatClientsideWeaponScript(script string) (string, bool) {
@@ -4302,6 +4332,10 @@ func formatClientsideWeaponScript(script string) (string, bool) {
 		out = append(out, strings.TrimSpace(line))
 	}
 	return strings.Join(out, "\xa7") + "\xa7", true
+}
+
+func clientsideScriptIsGS1(script string) bool {
+	return strings.Contains(strings.ToUpper(script), "//#GS1")
 }
 
 func (p *Player) sendPLO_RC_ADMINMESSAGE(message string) bool {
@@ -5242,40 +5276,27 @@ func (p *Player) appendPlayerPropDelta(propId int, commonBuff, legacyMoveBuff, p
 	if propId < 0 || propId >= len(sendLocalProps) || !sendLocalProps[propId] {
 		return
 	}
+	commonBuff.WriteGChar(byte(propId))
+	commonBuff.Write(p.getProp(propId))
 	switch propId {
 	case PLPROP_X:
-		legacyMoveBuff.WriteGChar(PLPROP_X)
-		legacyMoveBuff.Write(p.getProp(PLPROP_X))
 		preciseMoveBuff.WriteGChar(PLPROP_X2)
 		preciseMoveBuff.Write(p.getProp(PLPROP_X2))
 	case PLPROP_Y:
-		legacyMoveBuff.WriteGChar(PLPROP_Y)
-		legacyMoveBuff.Write(p.getProp(PLPROP_Y))
 		preciseMoveBuff.WriteGChar(PLPROP_Y2)
 		preciseMoveBuff.Write(p.getProp(PLPROP_Y2))
 	case PLPROP_Z:
-		legacyMoveBuff.WriteGChar(PLPROP_Z)
-		legacyMoveBuff.Write(p.getProp(PLPROP_Z))
 		preciseMoveBuff.WriteGChar(PLPROP_Z2)
 		preciseMoveBuff.Write(p.getProp(PLPROP_Z2))
 	case PLPROP_X2:
-		preciseMoveBuff.WriteGChar(PLPROP_X2)
-		preciseMoveBuff.Write(p.getProp(PLPROP_X2))
 		legacyMoveBuff.WriteGChar(PLPROP_X)
 		legacyMoveBuff.Write(p.getProp(PLPROP_X))
 	case PLPROP_Y2:
-		preciseMoveBuff.WriteGChar(PLPROP_Y2)
-		preciseMoveBuff.Write(p.getProp(PLPROP_Y2))
 		legacyMoveBuff.WriteGChar(PLPROP_Y)
 		legacyMoveBuff.Write(p.getProp(PLPROP_Y))
 	case PLPROP_Z2:
-		preciseMoveBuff.WriteGChar(PLPROP_Z2)
-		preciseMoveBuff.Write(p.getProp(PLPROP_Z2))
 		legacyMoveBuff.WriteGChar(PLPROP_Z)
 		legacyMoveBuff.Write(p.getProp(PLPROP_Z))
-	default:
-		commonBuff.WriteGChar(byte(propId))
-		commonBuff.Write(p.getProp(propId))
 	}
 }
 
@@ -5301,12 +5322,10 @@ func (p *Player) sendPlayerPropDeltasToCurrentLevel(common, legacyMove, preciseM
 		out := NewBuffer()
 		out.WriteByte(PLO_OTHERPLPROPS).WriteGShort(p.id)
 		if playerSupportsPreciseMovement(p) {
-			out.Write(preciseMove)
-			out.Write(common)
 			out.Write(legacyMove)
+			out.Write(common)
 		} else {
 			out.Write(common)
-			out.Write(legacyMove)
 			out.Write(preciseMove)
 		}
 		pl.sendPacket(append(out.Bytes(), '\n'))
@@ -5323,6 +5342,13 @@ func (p *Player) supportsRawClassScript() bool {
 
 func (p *Player) supportsRawWeaponScript() bool {
 	return p != nil && p.versionId >= 300
+}
+
+func (p *Player) supportsTextWeaponScript(script string) bool {
+	if p == nil || p.versionId == 0 || p.versionId >= 300 {
+		return true
+	}
+	return clientsideScriptIsGS1(script)
 }
 
 func (p *Player) readPlayerPowerImageProp(sword bool, buf *Buffer) {
@@ -5572,6 +5598,9 @@ func (p *Player) msgPLI_FLAGSET(packet []byte) bool {
 	if len(packet) > 1 {
 		parts := strings.SplitN(string(packet[1:]), "=", 2)
 		if len(parts) == 2 {
+			if p.handleMovementFlag(parts[0], parts[1]) {
+				return true
+			}
 			p.SetFlag(parts[0], parts[1])
 		} else {
 			p.SetFlag(parts[0], "")
@@ -6085,7 +6114,11 @@ func (p *Player) msgPLI_SENDTEXT(packet []byte) bool {
 func (p *Player) sendRawDataPayload(payload []byte) {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RAWDATA)
-	buf.WriteGInt(uint32(len(payload)))
+	size := len(payload)
+	if size > 0 {
+		size--
+	}
+	buf.WriteGInt(uint32(size))
 	buf.WriteByte('\n')
 	buf.Write(payload)
 	p.sendPacket(buf.Bytes())

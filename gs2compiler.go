@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,7 +73,33 @@ func (s *Server) compileGS2ForFeedback(scriptType, scriptName, script string) gs
 		}
 		return gs2CompileResult{errText: fmt.Sprintf("compiler did not write bytecode: %v", err)}
 	}
+	if scriptType != "" && scriptName != "" {
+		bytecode = createGS2BytecodeHeader(bytecode, scriptType, scriptName, true)
+	}
 	return gs2CompileResult{bytecode: bytecode}
+}
+
+func createGS2BytecodeHeader(bytecode []byte, scriptType, scriptName string, saveToDisk bool) []byte {
+	if len(bytecode) == 0 {
+		return nil
+	}
+	save := "0"
+	if saveToDisk {
+		save = "1"
+	}
+	header := []byte(scriptType + "," + scriptName + "," + save + ",")
+	key := make([]byte, 10)
+	if _, err := rand.Read(key); err != nil {
+		for i := range key {
+			key[i] = byte(time.Now().UnixNano() >> (i * 5))
+		}
+	}
+	header = append(header, key...)
+	out := NewBuffer()
+	out.WriteGShort(uint16(len(header)))
+	out.Write(header)
+	out.Write(bytecode)
+	return out.Bytes()
 }
 
 func safeCompilerFileName(name string) string {
@@ -90,6 +117,9 @@ func safeCompilerFileName(name string) string {
 }
 
 func clientsideGS2(script string) (string, bool) {
+	if clientsideScriptIsGS1(script) {
+		return "", false
+	}
 	const marker = "//#CLIENTSIDE"
 	idx := strings.Index(strings.ToUpper(script), marker)
 	if idx < 0 {
