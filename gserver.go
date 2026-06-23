@@ -65,6 +65,8 @@ type Server struct {
 	flagMu           sync.RWMutex
 	serverList       *ServerList
 	serverLists      []*ServerList
+	listserverMu     sync.RWMutex
+	listserverCache  map[string]cachedListserverServer
 	npcServer        *NPCServer
 	gs2Sockets       *GS2SocketManager
 	triggerCommands  map[string]func(*Player, []string) bool
@@ -4281,26 +4283,24 @@ func (p *Player) sendWeapon(weapon *Weapon) bool {
 		return false
 	}
 	scriptsEnabled := p.server != nil && p.server.npcServerRunning()
-	sendBytecode := false
+	sendBytecode := scriptsEnabled && len(weapon.bytecode) > 0 && p.supportsRawWeaponScript()
 	buf := NewBuffer()
 	buf.WriteByte(PLO_NPCWEAPONADD)
 	buf.WriteGChar(byte(len(weapon.name))).Write([]byte(weapon.name))
 	if weapon.image != "" {
 		buf.WriteGChar(NPCPROP_IMAGE).WriteGChar(byte(len(weapon.image))).Write([]byte(weapon.image))
 	}
-	if scriptsEnabled && !sendBytecode && p.supportsTextWeaponScript(weapon.script) {
+	if scriptsEnabled && !sendBytecode {
 		if script, ok := formatClientsideWeaponScript(weapon.script); ok {
 			buf.WriteGChar(NPCPROP_SCRIPT).WriteGShort(uint16(len(script))).Write([]byte(script))
 		}
 	}
-	if sendBytecode {
-		header, ok := gs2BytecodeHeader(weapon.bytecode)
-		if ok {
-			buf.WriteGChar(NPCPROP_CLASS).WriteGShort(0).WriteByte('\n')
-			buf.WriteGChar(PLO_UNKNOWN197).Write(header).WriteByte(',').WriteGInt5(uint64(time.Now().Unix())).WriteByte('\n')
-		}
-	}
 	p.send(buf)
+	if sendBytecode {
+		bytecode := gs2BytecodeWithHeader(weapon.bytecode, "weapon", weapon.name, true)
+		p.server.logger.Debug("sendWeapon: sending bytecode for %s (%d bytes)", weapon.name, len(bytecode))
+		p.sendRawNpcWeaponScript(bytecode)
+	}
 	return true
 }
 
@@ -4381,20 +4381,18 @@ func (p *Player) sendPLO_DEFAULTWEAPON(weaponId byte) bool {
 }
 
 func (p *Player) sendAccountWeapon(weaponName string) bool {
+	weaponName = strings.TrimSpace(weaponName)
 	if p == nil || p.server == nil || weaponName == "" {
 		return false
 	}
-	if itemType := getItemId(strings.ToLower(weaponName)); itemType != LevelItemType(-1) {
+	if itemType := getDefaultWeaponItemId(weaponName); itemType != LevelItemType(-1) {
 		if p.server.settings != nil && !p.server.settings.GetBool("defaultweapons", true) {
 			return false
 		}
 		p.server.logger.Debug("Sending default weapon: %s", weaponName)
 		return p.sendPLO_DEFAULTWEAPON(byte(itemType))
 	}
-	weapon := p.server.weapons[weaponName]
-	if weapon == nil {
-		weapon = p.server.weapons[strings.ToLower(weaponName)]
-	}
+	weapon := p.server.GetWeapon(weaponName)
 	if weapon == nil {
 		return false
 	}
@@ -4710,15 +4708,29 @@ func parseNicknameGuild(nickname string) string {
 	return strings.TrimSpace(nickname[start+1 : end])
 }
 
-func (p *Player) addWeapon(weaponName string) {
+func (p *Player) addWeapon(weaponName string) bool {
+	weaponName = strings.TrimSpace(weaponName)
+	if weaponName == "" || !p.canAddWeapon(weaponName) {
+		return false
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, w := range p.weaponList {
-		if w == weaponName {
-			return
+		if strings.EqualFold(strings.TrimSpace(w), weaponName) {
+			return false
 		}
 	}
 	p.weaponList = append(p.weaponList, weaponName)
+	return true
+}
+func (p *Player) canAddWeapon(weaponName string) bool {
+	if getDefaultWeaponItemId(weaponName) != LevelItemType(-1) {
+		return true
+	}
+	if p == nil || p.server == nil {
+		return false
+	}
+	return p.server.GetWeapon(weaponName) != nil
 }
 func (p *Player) hasAccountWeapon(weaponName string) bool {
 	weaponName = strings.ToLower(strings.TrimSpace(weaponName))
@@ -6114,11 +6126,7 @@ func (p *Player) msgPLI_SENDTEXT(packet []byte) bool {
 func (p *Player) sendRawDataPayload(payload []byte) {
 	buf := NewBuffer()
 	buf.WriteByte(PLO_RAWDATA)
-	size := len(payload)
-	if size > 0 {
-		size--
-	}
-	buf.WriteGInt(uint32(size))
+	buf.WriteGInt(uint32(len(payload)))
 	buf.WriteByte('\n')
 	buf.Write(payload)
 	p.sendPacket(buf.Bytes())
@@ -6801,6 +6809,15 @@ func getItemId(itemName string) LevelItemType {
 		}
 	}
 	return LevelItemType(-1)
+}
+func getDefaultWeaponItemId(itemName string) LevelItemType {
+	itemType := getItemId(strings.ToLower(strings.TrimSpace(itemName)))
+	switch itemType {
+	case ItemBow, ItemBomb, ItemSuperBomb, ItemFireball, ItemFireblast, ItemNukeshot, ItemJoltbomb:
+		return itemType
+	default:
+		return LevelItemType(-1)
+	}
 }
 func getItemName(itemType LevelItemType) string {
 	if int(itemType) < 0 || int(itemType) >= len(itemList) {
@@ -8358,10 +8375,12 @@ func (sl *ServerList) handleRequestText(data []byte) {
 	out := NewBuffer()
 	out.WriteByte(PLO_SERVERTEXT).Write(message)
 	player.send(out)
+	sl.server.cacheListserverText(message)
 }
 
 func (sl *ServerList) handleSendText(data []byte) {
 	sl.server.logger.Debug("[LISTSERVER] SENDTEXT: %s", string(data))
+	sl.server.cacheListserverText(data)
 }
 
 func (sl *ServerList) handleServerInfo(data []byte) {

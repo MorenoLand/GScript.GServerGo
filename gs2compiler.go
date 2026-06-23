@@ -73,35 +73,51 @@ func (s *Server) compileGS2ForFeedback(scriptType, scriptName, script string) gs
 		}
 		return gs2CompileResult{errText: fmt.Sprintf("compiler did not write bytecode: %v", err)}
 	}
-	if scriptType != "" && scriptName != "" {
-		bytecode = createGS2BytecodeHeader(bytecode, scriptType, scriptName, true)
-	}
-	return gs2CompileResult{bytecode: bytecode}
+	return gs2CompileResult{bytecode: gs2BytecodeWithHeader(bytecode, scriptType, scriptName, true)}
 }
 
-func createGS2BytecodeHeader(bytecode []byte, scriptType, scriptName string, saveToDisk bool) []byte {
+func gs2BytecodeWithHeader(bytecode []byte, scriptType, scriptName string, saveToDisk bool) []byte {
 	if len(bytecode) == 0 {
 		return nil
 	}
-	save := "0"
-	if saveToDisk {
-		save = "1"
+	if _, ok := gs2BytecodeHeader(bytecode); ok {
+		return bytecode
 	}
-	header := []byte(scriptType + "," + scriptName + "," + save + ",")
-	out := NewBuffer()
-	out.WriteGShort(uint16(len(header)))
-	out.Write(header)
-	key := make([]byte, 10)
-	if _, err := rand.Read(key); err != nil {
+	headerLen := len(scriptType) + len(scriptName) + 14
+	buf := NewBuffer()
+	buf.WriteGShort(uint16(headerLen))
+	buf.Write([]byte(scriptType))
+	buf.WriteByte(',')
+	buf.Write([]byte(scriptName))
+	buf.WriteByte(',')
+	if saveToDisk {
+		buf.WriteByte('1')
+	} else {
+		buf.WriteByte('0')
+	}
+	buf.WriteByte(',')
+	key := gs2HeaderKey()
+	buf.Write(key[:])
+	buf.Write(bytecode)
+	return buf.Bytes()
+}
+
+func gs2HeaderKey() [10]byte {
+	var key [10]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		seed := uint64(time.Now().UnixNano())
 		for i := range key {
-			key[i] = byte(time.Now().UnixNano() >> (i * 5))
+			seed = seed*1664525 + 1013904223
+			key[i] = byte(seed % 255)
 		}
 	}
-	for _, v := range key {
-		out.WriteGChar(v)
+	for i := range key {
+		key[i] %= 255
+		if key[i] < 223 {
+			key[i] += 32
+		}
 	}
-	out.Write(bytecode)
-	return out.Bytes()
+	return key
 }
 
 func safeCompilerFileName(name string) string {

@@ -9286,7 +9286,7 @@ func TestSendWeaponSendsBytecodeWithoutSourceForModernClients(t *testing.T) {
 	p.encryption.SetGen(ENCRYPT_GEN_1)
 
 	weapon := &Weapon{name: "-gr_movement", image: "wbomb1.png", script: "//#CLIENTSIDE\nfunction onCreated(){ triggerServer(\"gui\", name, \"x\"); }"}
-	weapon.bytecode = createGS2BytecodeHeader([]byte{0x01, 0x02, 0x03}, "weapon", weapon.name, true)
+	weapon.bytecode = []byte{0x01, 0x02, 0x03}
 	done := make(chan struct{}, 1)
 	go func() {
 		p.sendWeapon(weapon)
@@ -9294,19 +9294,39 @@ func TestSendWeaponSendsBytecodeWithoutSourceForModernClients(t *testing.T) {
 	}()
 
 	clientConn.SetReadDeadline(time.Now().Add(time.Second))
-	got := make([]byte, 256)
-	n, err := clientConn.Read(got)
-	if err != nil {
-		t.Fatalf("read weapon bytecode packets: %v", err)
+	var got bytes.Buffer
+	for {
+		chunk := make([]byte, 512)
+		n, err := clientConn.Read(chunk)
+		if err != nil {
+			t.Fatalf("read weapon bytecode packets: %v", err)
+		}
+		got.Write(chunk[:n])
+		select {
+		case <-done:
+			goto readDone
+		case <-time.After(10 * time.Millisecond):
+			select {
+			case <-done:
+				goto readDone
+			default:
+			}
+		}
 	}
-	<-done
-	got = got[:n]
+readDone:
+	gotBytes := got.Bytes()
 
-	if bytes.Contains(got, []byte{PLO_UNKNOWN197 + 32}) {
-		t.Fatalf("weapon bytecode delivery is disabled during login: % X", got)
+	if bytes.Contains(gotBytes, []byte{PLO_UNKNOWN197 + 32}) {
+		t.Fatalf("weapon bytecode should use raw script payload, not header advertisement: % X", gotBytes)
 	}
-	if bytes.Contains(got, []byte{PLO_RAWDATA + 32}) {
-		t.Fatalf("weapon add should not push raw bytecode immediately: % X", got)
+	if !bytes.Contains(gotBytes, []byte{PLO_RAWDATA + 32}) {
+		t.Fatalf("weapon bytecode rawdata packet missing: % X", gotBytes)
+	}
+	if !bytes.Contains(gotBytes, []byte("weapon,-gr_movement,1,")) {
+		t.Fatalf("weapon bytecode header missing: % X", gotBytes)
+	}
+	if bytes.Contains(gotBytes, []byte("function onCreated")) {
+		t.Fatalf("modern client should not receive source script with bytecode: % X", gotBytes)
 	}
 }
 
@@ -9341,6 +9361,32 @@ func TestSendAccountWeaponUsesDefaultWeaponPacketForBombAndBow(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("default weapon packets = % X, want % X", got, want)
+	}
+}
+
+func TestAddWeaponRejectsMissingCustomWeapon(t *testing.T) {
+	p := &Player{server: &Server{weapons: make(map[string]*Weapon)}}
+	if p.addWeapon("-missing") {
+		t.Fatalf("addWeapon accepted missing weapon")
+	}
+	if len(p.weaponList) != 0 {
+		t.Fatalf("weaponList = %v, want empty", p.weaponList)
+	}
+}
+
+func TestAddWeaponAllowsExistingCustomAndDefaultWeapons(t *testing.T) {
+	p := &Player{server: &Server{weapons: map[string]*Weapon{"-core": {name: "-Core"}}}}
+	if !p.addWeapon("-Core") {
+		t.Fatalf("addWeapon rejected existing custom weapon")
+	}
+	if !p.addWeapon("bomb") {
+		t.Fatalf("addWeapon rejected default weapon")
+	}
+	if p.addWeapon("BOMB") {
+		t.Fatalf("addWeapon accepted duplicate default weapon")
+	}
+	if got := strings.Join(p.weaponList, ","); got != "-Core,bomb" {
+		t.Fatalf("weaponList = %q", got)
 	}
 }
 
@@ -9453,9 +9499,7 @@ func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
 	if !p.sendAccountWeapon("-gr_movement") {
 		t.Fatal("sendAccountWeapon returned false")
 	}
-	if string(weapon.bytecode) != "bytecode:weapon:-gr_movement" {
-		t.Fatalf("weapon bytecode = %q, want compiler output", weapon.bytecode)
-	}
+	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "-gr_movement", []byte("bytecode:weapon:-gr_movement"))
 	if !bytes.Contains(p.outQueue, []byte("bytecode:weapon:-gr_movement")) {
 		t.Fatalf("queued weapon packets missing bytecode: % X", p.outQueue)
 	}
@@ -9463,9 +9507,7 @@ func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved bytecode: %v", err)
 	}
-	if string(bytecode) != "bytecode:weapon:-gr_movement" {
-		t.Fatalf("saved bytecode = %q, want compiler output", bytecode)
-	}
+	assertGS2WrappedBytecode(t, bytecode, "weapon", "-gr_movement", []byte("bytecode:weapon:-gr_movement"))
 }
 
 func TestLoginCompilesAccountWeaponsBeforeSending(t *testing.T) {
@@ -9497,8 +9539,27 @@ func TestLoginCompilesAccountWeaponsBeforeSending(t *testing.T) {
 	if !p.handleLogin(buildLoginPacket(t, 5, 0, "G3D03014", "moondeath", "pass", "device-token")) {
 		t.Fatal("handleLogin returned false")
 	}
-	if string(weapon.bytecode) != "bytecode:weapon:-gr_movement" {
-		t.Fatalf("weapon bytecode = %q, want compiler output", weapon.bytecode)
+	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "-gr_movement", []byte("bytecode:weapon:-gr_movement"))
+}
+
+func assertGS2WrappedBytecode(t *testing.T, got []byte, scriptType, scriptName string, payload []byte) {
+	t.Helper()
+	buf := NewBufferFromBytes(got)
+	headerLen := int(buf.ReadGShort())
+	if headerLen <= 0 || headerLen > buf.BytesLeft() {
+		t.Fatalf("invalid gs2 bytecode header length %d in % X", headerLen, got)
+	}
+	header := buf.ReadBytes(headerLen)
+	prefix := []byte(scriptType + "," + scriptName + ",1,")
+	if !bytes.HasPrefix(header, prefix) {
+		t.Fatalf("gs2 bytecode header = %q, want prefix %q", header, prefix)
+	}
+	if len(header) != len(prefix)+10 {
+		t.Fatalf("gs2 bytecode header length = %d, want %d", len(header), len(prefix)+10)
+	}
+	body := buf.ReadBytes(buf.BytesLeft())
+	if !bytes.Equal(body, payload) {
+		t.Fatalf("gs2 bytecode payload = %q, want %q", body, payload)
 	}
 }
 
@@ -9984,7 +10045,7 @@ func TestUpdateScriptWrapsBytecodeInRawData(t *testing.T) {
 	packet := append([]byte{PLI_UPDATESCRIPT}, []byte("-test")...)
 	payload := append([]byte{PLO_NPCWEAPONSCRIPT + 32}, bytecode...)
 	expectedLen := NewBuffer()
-	expectedLen.WriteGInt(uint32(len(bytecode)))
+	expectedLen.WriteGInt(uint32(len(payload)))
 	want := append([]byte{PLO_RAWDATA + 32}, expectedLen.Bytes()...)
 	want = append(want, '\n')
 	want = append(want, payload...)
