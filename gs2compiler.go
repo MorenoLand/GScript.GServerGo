@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	gs2parser "github.com/MorenoLand/GScript.gs2parser-go"
 )
 
 type gs2CompileResult struct {
@@ -18,62 +15,26 @@ type gs2CompileResult struct {
 }
 
 func (s *Server) compileGS2ForFeedback(scriptType, scriptName, script string) gs2CompileResult {
-	if s == nil || s.settings == nil {
+	if s == nil {
 		return gs2CompileResult{}
 	}
 	src, ok := clientsideGS2(script)
 	if !ok {
 		return gs2CompileResult{}
 	}
-	compilerPath := strings.TrimSpace(s.settings.Get("gs2compiler"))
-	if compilerPath == "" {
-		return gs2CompileResult{warningText: "gs2compiler is not configured; saved without compile feedback"}
+	res := gs2parser.CompileDetailed(src)
+	if len(res.Diagnostics) != 0 {
+		return gs2CompileResult{errText: gs2DiagnosticsText(res.Diagnostics)}
 	}
+	return gs2CompileResult{bytecode: gs2BytecodeWithHeader(res.Bytecode, scriptType, scriptName, true)}
+}
 
-	tmpRoot := filepath.Join(".", ".gs2tmp")
-	if s.config != nil {
-		tmpRoot = s.config.ResolvePath(".gs2tmp")
+func gs2DiagnosticsText(diagnostics []gs2parser.Diagnostic) string {
+	lines := make([]string, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		lines = append(lines, diagnostic.Error())
 	}
-	if err := os.MkdirAll(tmpRoot, 0700); err != nil {
-		return gs2CompileResult{errText: err.Error()}
-	}
-	tmpDir, err := os.MkdirTemp(tmpRoot, "compile-*")
-	if err != nil {
-		return gs2CompileResult{errText: err.Error()}
-	}
-	defer os.RemoveAll(tmpDir)
-
-	baseName := safeCompilerFileName(scriptName)
-	inputPath := filepath.Join(tmpDir, baseName+".gs2")
-	outputPath := filepath.Join(tmpDir, baseName+".gs2bc")
-	if err := os.WriteFile(inputPath, []byte(src), 0600); err != nil {
-		return gs2CompileResult{errText: err.Error()}
-	}
-
-	args := splitCompilerArgs(s.settings.Get("gs2compilerargs"))
-	args = append(args, inputPath, outputPath)
-	cmd := exec.Command(compilerPath, args...)
-	cmd.Env = append(os.Environ(), "GS2_SCRIPT_TYPE="+scriptType, "GS2_SCRIPT_NAME="+scriptName)
-	var combined bytes.Buffer
-	cmd.Stdout = &combined
-	cmd.Stderr = &combined
-	if err := runCompilerWithTimeout(cmd, 10*time.Second); err != nil {
-		msg := strings.TrimSpace(combined.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return gs2CompileResult{errText: msg}
-	}
-
-	bytecode, err := os.ReadFile(outputPath)
-	if err != nil {
-		msg := strings.TrimSpace(combined.String())
-		if msg != "" {
-			return gs2CompileResult{errText: msg}
-		}
-		return gs2CompileResult{errText: fmt.Sprintf("compiler did not write bytecode: %v", err)}
-	}
-	return gs2CompileResult{bytecode: gs2BytecodeWithHeader(bytecode, scriptType, scriptName, true)}
+	return strings.Join(lines, "\n")
 }
 
 func gs2BytecodeWithHeader(bytecode []byte, scriptType, scriptName string, saveToDisk bool) []byte {
@@ -120,20 +81,6 @@ func gs2HeaderKey() [10]byte {
 	return key
 }
 
-func safeCompilerFileName(name string) string {
-	name = strings.TrimSpace(name)
-	var b strings.Builder
-	for _, r := range name {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return "script"
-	}
-	return b.String()
-}
-
 func clientsideGS2(script string) (string, bool) {
 	if clientsideScriptIsGS1(script) {
 		return "", false
@@ -144,30 +91,4 @@ func clientsideGS2(script string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(script[idx+len(marker):]), true
-}
-
-func splitCompilerArgs(args string) []string {
-	fields := strings.Fields(args)
-	if len(fields) == 0 {
-		return nil
-	}
-	return fields
-}
-
-func runCompilerWithTimeout(cmd *exec.Cmd, timeout time.Duration) error {
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case err := <-done:
-		return err
-	case <-timer.C:
-		_ = cmd.Process.Kill()
-		<-done
-		return fmt.Errorf("compiler timed out")
-	}
 }

@@ -5,6 +5,7 @@ go 1.23
 toolchain go1.24.12
 
 require (
+	github.com/MorenoLand/GScript.gs2parser-go v0.0.0
 	github.com/MorenoLand/GScript.gs2vm-go v0.0.0
 	github.com/dsnet/compress v0.0.1
 	github.com/fsnotify/fsnotify v1.10.1
@@ -20,3 +21,5 @@ require (
 )
 
 replace github.com/MorenoLand/GScript.gs2vm-go => ../gs2vm-go
+
+replace github.com/MorenoLand/GScript.gs2parser-go => ../gs2parser

@@ -193,6 +193,17 @@ func TestGS2CompilerHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestCompileGS2ForFeedbackUsesNativeCompilerWithoutExternalConfig(t *testing.T) {
+	server := &Server{logger: NewLogger("", false), settings: NewSettings()}
+
+	result := server.compileGS2ForFeedback("weapon", "-native", "//#CLIENTSIDE\nfunction onCreated() {\n  player.chat = \"hi\";\n}")
+
+	if result.errText != "" || result.warningText != "" {
+		t.Fatalf("compile feedback err=%q warning=%q", result.errText, result.warningText)
+	}
+	assertGS2WrappedBytecode(t, result.bytecode, "weapon", "-native", nil)
+}
+
 func TestRunServerSideGS2UsesNativeVMAndStripsClientsideBlock(t *testing.T) {
 	server := &Server{logger: NewLogger("", false), settings: NewSettings()}
 
@@ -1732,11 +1743,8 @@ func TestNCWeaponListAfterWeaponAddIsSingleCleanPacket(t *testing.T) {
 }
 
 func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
-	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
-	server.settings.Set("gs2compiler", os.Args[0])
-	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
 	nc := NewPlayer(nil, server)
 	nc.id = 3
@@ -1761,18 +1769,15 @@ func TestNCWeaponAddReportsGS2CompilerErrors(t *testing.T) {
 		t.Fatalf("bad weapon was added after compiler error")
 	}
 	wantHeader := append([]byte{PLO_RC_CHAT + 32}, []byte("Script compiler output for Weapon badweapon:")...)
-	wantError := append([]byte{PLO_RC_CHAT + 32}, []byte("error: parser error occurred near line 1: bad syntax")...)
-	if !bytes.Contains(nc.outQueue, wantHeader) || !bytes.Contains(nc.outQueue, wantError) {
+	wantError := append([]byte{PLO_RC_CHAT + 32}, []byte("error:")...)
+	if !bytes.Contains(nc.outQueue, wantHeader) || !bytes.Contains(nc.outQueue, wantError) || !bytes.Contains(nc.outQueue, []byte("bad")) {
 		t.Fatalf("NC compiler error response = % X, want header % X and error % X", nc.outQueue, wantHeader, wantError)
 	}
 }
 
-func TestNCWeaponAddReportsCompilerOutputWhenOutputFileMissing(t *testing.T) {
-	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
+func TestNCWeaponAddReportsNativeCompilerDiagnostics(t *testing.T) {
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
-	server.settings.Set("gs2compiler", os.Args[0])
-	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
 	nc := NewPlayer(nil, server)
 	nc.id = 3
@@ -1788,22 +1793,22 @@ func TestNCWeaponAddReportsCompilerOutputWhenOutputFileMissing(t *testing.T) {
 	add.Write([]byte("badweapon"))
 	add.WriteGChar(byte(len("bcalarmclock.png")))
 	add.Write([]byte("bcalarmclock.png"))
-	add.Write([]byte("//#CLIENTSIDE\xa7silent output failure"))
+	add.Write([]byte("//#CLIENTSIDE\xa7function onCreated( {"))
 
 	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
 		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
 	}
 	if server.GetWeapon("badweapon") != nil {
-		t.Fatalf("bad weapon was added after compiler output failure")
+		t.Fatalf("bad weapon was added after compiler diagnostic")
 	}
 	wantHeader := append([]byte{PLO_RC_CHAT + 32}, []byte("Script compiler output for Weapon badweapon:")...)
-	wantError := append([]byte{PLO_RC_CHAT + 32}, []byte("error: malformed input at line 1: silent output failure")...)
+	wantError := append([]byte{PLO_RC_CHAT + 32}, []byte("error:")...)
 	if !bytes.Contains(nc.outQueue, wantHeader) || !bytes.Contains(nc.outQueue, wantError) {
-		t.Fatalf("NC compiler missing-output response = % X, want header % X and error % X", nc.outQueue, wantHeader, wantError)
+		t.Fatalf("NC compiler diagnostic response = % X, want header % X and error % X", nc.outQueue, wantHeader, wantError)
 	}
 }
 
-func TestNCWeaponAddWarnsWhenClientsideScriptCannotCompileWithoutCompiler(t *testing.T) {
+func TestNCWeaponAddRejectsClientsideScriptWhenNativeCompileFails(t *testing.T) {
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
 	server.weapons = map[string]*Weapon{}
@@ -1826,22 +1831,19 @@ func TestNCWeaponAddWarnsWhenClientsideScriptCannotCompileWithoutCompiler(t *tes
 	if !nc.msgPLI_NC_WEAPONADD(add.Bytes()) {
 		t.Fatalf("msgPLI_NC_WEAPONADD returned false")
 	}
-	if server.GetWeapon("test") == nil {
-		t.Fatalf("weapon was not saved when compiler was unavailable")
+	if server.GetWeapon("test") != nil {
+		t.Fatalf("bad weapon was added after compiler error")
 	}
 	wantHeader := append([]byte{PLO_RC_CHAT + 32}, []byte("Script compiler output for Weapon test:")...)
-	wantWarning := append([]byte{PLO_RC_CHAT + 32}, []byte("warning: gs2compiler is not configured; saved without compile feedback")...)
-	if !bytes.Contains(nc.outQueue, wantHeader) || !bytes.Contains(nc.outQueue, wantWarning) {
-		t.Fatalf("NC compiler warning response = % X, want header % X and warning % X", nc.outQueue, wantHeader, wantWarning)
+	wantError := append([]byte{PLO_RC_CHAT + 32}, []byte("error:")...)
+	if !bytes.Contains(nc.outQueue, wantHeader) || !bytes.Contains(nc.outQueue, wantError) {
+		t.Fatalf("NC compiler error response = % X, want header % X and error % X", nc.outQueue, wantHeader, wantError)
 	}
 }
 
 func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
-	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
-	server.settings.Set("gs2compiler", os.Args[0])
-	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
 	nc := NewPlayer(nil, server)
 	nc.id = 3
@@ -1866,17 +1868,12 @@ func TestNCWeaponAddStoresCompiledBytecodeWhenCompilerSucceeds(t *testing.T) {
 	if weapon == nil {
 		t.Fatalf("weapon was not added")
 	}
-	if !bytes.Contains(weapon.bytecode, []byte("bytecode:weapon:test")) {
-		t.Fatalf("compiled bytecode = %q", weapon.bytecode)
-	}
+	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "test", nil)
 }
 
 func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
-	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
-	server.settings.Set("gs2compiler", os.Args[0])
-	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	server.weapons = map[string]*Weapon{}
 	nc := NewPlayer(nil, server)
 	nc.id = 3
@@ -1908,9 +1905,7 @@ func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved bytecode file: %v", err)
 	}
-	if !bytes.Contains(bytecode, []byte("bytecode:weapon:test")) {
-		t.Fatalf("saved bytecode = %q", bytecode)
-	}
+	assertGS2WrappedBytecode(t, bytecode, "weapon", "test", nil)
 
 	reloaded := NewServer("Reloaded")
 	reloaded.config = server.config
@@ -1921,9 +1916,7 @@ func TestNCWeaponAddPersistsAndReloadsCompiledBytecode(t *testing.T) {
 	if loadedWeapon == nil {
 		t.Fatal("reloaded weapon not found")
 	}
-	if !bytes.Contains(loadedWeapon.bytecode, []byte("bytecode:weapon:test")) {
-		t.Fatalf("reloaded bytecode = %q", loadedWeapon.bytecode)
-	}
+	assertGS2WrappedBytecode(t, loadedWeapon.bytecode, "weapon", "test", nil)
 }
 
 func TestNCWeaponGetParsesPayloadAfterPacketID(t *testing.T) {
@@ -9495,11 +9488,8 @@ func TestSendAccountWeaponFallsBackToScriptWeapon(t *testing.T) {
 }
 
 func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
-	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
-	server.settings.Set("gs2compiler", os.Args[0])
-	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	weapon := &Weapon{
 		name:   "-gr_movement",
 		image:  "bcalarmclock.png",
@@ -9514,23 +9504,20 @@ func TestSendAccountWeaponCompilesClientsideScriptBeforeSending(t *testing.T) {
 	if !p.sendAccountWeapon("-gr_movement") {
 		t.Fatal("sendAccountWeapon returned false")
 	}
-	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "-gr_movement", []byte("bytecode:weapon:-gr_movement"))
-	if !bytes.Contains(p.outQueue, []byte("bytecode:weapon:-gr_movement")) {
+	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "-gr_movement", nil)
+	if !bytes.Contains(p.outQueue, weapon.bytecode) {
 		t.Fatalf("queued weapon packets missing bytecode: % X", p.outQueue)
 	}
 	bytecode, err := os.ReadFile(filepath.Join(server.config.GetBasePath(), "weapon_bytecode", "weapon-gr_movement.gs2bc"))
 	if err != nil {
 		t.Fatalf("read saved bytecode: %v", err)
 	}
-	assertGS2WrappedBytecode(t, bytecode, "weapon", "-gr_movement", []byte("bytecode:weapon:-gr_movement"))
+	assertGS2WrappedBytecode(t, bytecode, "weapon", "-gr_movement", nil)
 }
 
 func TestLoginCompilesAccountWeaponsBeforeSending(t *testing.T) {
-	t.Setenv("GO_WANT_GS2_HELPER_PROCESS", "1")
 	server := newLoginTestServer(t)
 	enableTestNPCServer(server)
-	server.settings.Set("gs2compiler", os.Args[0])
-	server.settings.Set("gs2compilerargs", "-test.run=TestGS2CompilerHelperProcess --")
 	writeTestFile(t, server.config.GetBasePath(), "accounts/moondeath.txt", ""+
 		"GRACC001\n"+
 		"NICK moondeath\n"+
@@ -9554,10 +9541,10 @@ func TestLoginCompilesAccountWeaponsBeforeSending(t *testing.T) {
 	if !p.handleLogin(buildLoginPacket(t, 5, 0, "G3D03014", "moondeath", "pass", "device-token")) {
 		t.Fatal("handleLogin returned false")
 	}
-	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "-gr_movement", []byte("bytecode:weapon:-gr_movement"))
+	assertGS2WrappedBytecode(t, weapon.bytecode, "weapon", "-gr_movement", nil)
 }
 
-func assertGS2WrappedBytecode(t *testing.T, got []byte, scriptType, scriptName string, payload []byte) {
+func assertGS2WrappedBytecode(t *testing.T, got []byte, scriptType, scriptName string, payload []byte) []byte {
 	t.Helper()
 	buf := NewBufferFromBytes(got)
 	headerLen := int(buf.ReadGShort())
@@ -9573,9 +9560,13 @@ func assertGS2WrappedBytecode(t *testing.T, got []byte, scriptType, scriptName s
 		t.Fatalf("gs2 bytecode header length = %d, want %d", len(header), len(prefix)+10)
 	}
 	body := buf.ReadBytes(buf.BytesLeft())
-	if !bytes.Equal(body, payload) {
+	if len(body) == 0 {
+		t.Fatalf("gs2 bytecode payload is empty")
+	}
+	if payload != nil && !bytes.Equal(body, payload) {
 		t.Fatalf("gs2 bytecode payload = %q, want %q", body, payload)
 	}
+	return body
 }
 
 func TestLevelModTimeUsesGInt5WireFormat(t *testing.T) {
