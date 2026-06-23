@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -165,6 +166,7 @@ func (s *Server) runServerSideGS2NativeWithStateAndSocket(scriptType, scriptName
 		PlayerFlags:   s.snapshotGS2PlayerFlags(playerContext["account"]),
 		Players:       s.snapshotGS2Players(),
 		Weapons:       s.snapshotGS2Weapons(),
+		Servers:       s.snapshotGS2Servers(),
 		NPCs:          s.snapshotGS2NPCs(),
 		NPCID:         npcID,
 		This:          thisState,
@@ -332,6 +334,20 @@ func copyStringMap(values map[string]string) map[string]string {
 	for key, value := range values {
 		out[key] = value
 	}
+	return out
+}
+
+func (s *Server) snapshotGS2Servers() []nativegs2vm.ServerContext {
+	if s == nil {
+		return nil
+	}
+	s.listserverMu.RLock()
+	defer s.listserverMu.RUnlock()
+	out := make([]nativegs2vm.ServerContext, 0, len(s.listserverCache))
+	for _, server := range s.listserverCache {
+		out = append(out, nativegs2vm.ServerContext{Name: server.Name, Type: server.Type, PlayerCount: server.PlayerCount, Language: server.Language, Description: server.Description, URL: server.URL, Version: server.Version, GameVersions: server.GameVersions, Latency: server.Latency})
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out
 }
 

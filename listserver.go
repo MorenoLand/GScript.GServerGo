@@ -1,6 +1,23 @@
 package main
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
+
+type cachedListserverServer struct {
+	Name         string
+	Type         string
+	PlayerCount  int
+	Language     string
+	Description  string
+	URL          string
+	Version      string
+	GameVersions string
+	Latency      int
+	Updated      time.Time
+}
 
 type listserverEndpoint struct {
 	host string
@@ -141,4 +158,157 @@ func splitCommaList(value string) []string {
 		}
 	}
 	return out
+}
+
+func (s *Server) cacheListserverText(data []byte) {
+	if s == nil || len(data) == 0 {
+		return
+	}
+	text := strings.TrimSpace(strings.TrimRight(string(data), "\x00"))
+	if text == "" {
+		return
+	}
+	if strings.HasPrefix(strings.ToLower(text), "listserver,modify,server,") {
+		s.cacheListserverModify(text)
+		return
+	}
+	for _, record := range listserverRecords(text) {
+		s.cacheListserverRecord(record)
+	}
+}
+
+func (s *Server) cacheListserverModify(text string) {
+	fields := strings.Split(text, ",")
+	if len(fields) < 4 {
+		return
+	}
+	name := strings.TrimSpace(fields[3])
+	if name == "" {
+		return
+	}
+	server := cachedListserverServer{Name: name, Updated: time.Now()}
+	s.listserverMu.RLock()
+	if s.listserverCache != nil {
+		if existing, ok := s.listserverCache[strings.ToLower(name)]; ok {
+			server = existing
+			server.Updated = time.Now()
+		}
+	}
+	s.listserverMu.RUnlock()
+	for _, field := range fields[4:] {
+		key, value, ok := strings.Cut(strings.TrimSpace(field), "=")
+		if !ok {
+			continue
+		}
+		applyListserverServerField(&server, key, value)
+	}
+	s.storeListserverServer(server)
+}
+
+func (s *Server) cacheListserverRecord(record string) {
+	fields := splitListserverFields(record)
+	if len(fields) < 3 {
+		return
+	}
+	name := strings.TrimSpace(fields[0])
+	if name == "" || strings.EqualFold(name, "Listserver") || strings.EqualFold(name, "GraalEngine") {
+		return
+	}
+	server := cachedListserverServer{Name: name, Updated: time.Now()}
+	if len(fields) > 1 {
+		server.Type = fields[1]
+	}
+	if len(fields) > 2 {
+		server.PlayerCount, _ = strconv.Atoi(strings.TrimSpace(fields[2]))
+	}
+	if len(fields) > 3 {
+		server.Language = fields[3]
+	}
+	if len(fields) > 4 {
+		server.Description = fields[4]
+	}
+	if len(fields) > 5 {
+		server.URL = fields[5]
+	}
+	if len(fields) > 6 {
+		server.Version = fields[6]
+	}
+	if len(fields) > 7 {
+		server.GameVersions = fields[7]
+	}
+	if len(fields) > 8 {
+		server.Latency, _ = strconv.Atoi(strings.TrimSpace(fields[8]))
+	}
+	s.storeListserverServer(server)
+}
+
+func (s *Server) storeListserverServer(server cachedListserverServer) {
+	if strings.TrimSpace(server.Name) == "" {
+		return
+	}
+	s.listserverMu.Lock()
+	defer s.listserverMu.Unlock()
+	if s.listserverCache == nil {
+		s.listserverCache = make(map[string]cachedListserverServer)
+	}
+	s.listserverCache[strings.ToLower(server.Name)] = server
+}
+
+func listserverRecords(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	if strings.Contains(text, "\x01") {
+		text = strings.ReplaceAll(text, "\x01", "\n")
+	}
+	parts := strings.Split(text, "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func splitListserverFields(record string) []string {
+	if strings.Contains(record, "\x01") {
+		return splitAndTrim(record, "\x01")
+	}
+	if strings.Contains(record, ",") {
+		return splitAndTrim(guntokenizeText(record), "\n")
+	}
+	return nil
+}
+
+func splitAndTrim(value, sep string) []string {
+	parts := strings.Split(value, sep)
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, strings.TrimSpace(part))
+	}
+	return out
+}
+
+func applyListserverServerField(server *cachedListserverServer, key, value string) {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "name":
+		server.Name = value
+	case "type":
+		server.Type = value
+	case "players", "playercount":
+		server.PlayerCount, _ = strconv.Atoi(strings.TrimSpace(value))
+	case "language":
+		server.Language = value
+	case "description", "desc":
+		server.Description = value
+	case "url", "website":
+		server.URL = value
+	case "version", "serverversion":
+		server.Version = value
+	case "gameversions", "allowedversions":
+		server.GameVersions = value
+	case "latency", "ping":
+		server.Latency, _ = strconv.Atoi(strings.TrimSpace(value))
+	}
 }

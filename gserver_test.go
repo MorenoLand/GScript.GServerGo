@@ -223,6 +223,21 @@ func TestRunServerSideGS2ExportsServerFlagsAndOptions(t *testing.T) {
 	}
 }
 
+func TestRunServerSideGS2ExportsListserverServers(t *testing.T) {
+	server := &Server{logger: NewLogger("", false), settings: NewSettings()}
+	server.cacheListserverText([]byte("Orion-Go,Gold,3,English,Go Code GServer,https://example.test,Custom version,2.220,6.037,42"))
+	server.cacheListserverText([]byte("Listserver,Modify,Server,Orion-Go,players=4"))
+
+	result := server.runServerSideGS2("weapon", "test", "onCreated", "function onCreated(){ echo(servers[0].name SPC servers[0].players SPC servers[0].language); }")
+
+	if result.err != "" {
+		t.Fatalf("runServerSideGS2 err = %q", result.err)
+	}
+	if len(result.output) != 1 || result.output[0] != "Orion-Go 4 English" {
+		t.Fatalf("runServerSideGS2 output = %#v", result.output)
+	}
+}
+
 func TestApplyGS2VMResultSkipsStaleScheduledWeaponEvent(t *testing.T) {
 	server := &Server{weapons: map[string]*Weapon{"-loop": {name: "-loop", script: `function onKek(){ server.stale = "bad"; }`, vmRevision: 1}}}
 	server.applyGS2VMResult(gs2VMResult{scriptType: "weapon", scriptName: "-loop", script: `function onKek(){ server.stale = "bad"; }`, vmRevision: 0, scheduledEvents: []gs2VMScheduledEvent{{event: "Kek", delay: 0}}})
